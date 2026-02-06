@@ -5,9 +5,9 @@ const nextConfig: NextConfig = {
     domains: ['static.usernames.app-backend.toolsforhumanity.com'],
   },
   allowedDevOrigins: [
-    'https://unrespectable-alejandrina-unploughed.ngrok-free.dev',
-    'http://801e-125-180-167-179.ngrok-free.app',
-    'https://801e-125-180-167-179.ngrok-free.app',
+    'delilah-waterless-electroacoustically.ngrok-free.dev',
+    'https://delilah-waterless-electroacoustically.ngrok-free.dev',
+    'http://delilah-waterless-electroacoustically.ngrok-free.dev',
   ],
   reactStrictMode: false,
 };

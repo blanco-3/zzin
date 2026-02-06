@@ -2,7 +2,7 @@
 
 import FileRegistryABI from '@/abi/FileRegistry.json';
 import { Button } from '@worldcoin/mini-apps-ui-kit-react';
-import { MiniKit } from '@worldcoin/minikit-js';
+import { MiniKit, VerificationLevel } from '@worldcoin/minikit-js';
 import { useWaitForTransactionReceipt } from '@worldcoin/minikit-react';
 import { useEffect, useState } from 'react';
 import { createPublicClient, decodeAbiParameters, http, keccak256, toHex } from 'viem';
@@ -144,22 +144,21 @@ export const FileIntegrity = () => {
         throw new Error('NEXT_PUBLIC_FILE_REGISTRY_CONTRACT_ADDRESS가 필요합니다.');
       }
 
-      const userInfo = await MiniKit.getUserInfo();
-      if (!userInfo?.walletAddress) {
+      const walletAddress = MiniKit.user?.walletAddress;
+      if (!walletAddress) {
         throw new Error('월렛 주소를 불러오지 못했습니다.');
       }
-      const worldIdUser = await MiniKit.getUserByAddress(userInfo.walletAddress);
-      const worldid = worldIdUser.username || userInfo.walletAddress;
+      const worldIdUser = await MiniKit.getUserByAddress(walletAddress);
+      const worldid = worldIdUser.username || walletAddress;
       const timestamp = registerFile
         ? Math.floor(registerFile.lastModified / 1000) || Math.floor(Date.now() / 1000)
         : Math.floor(Date.now() / 1000);
 
       // World ID proof (Orb) bound to the file hash
       const verifyRes = await MiniKit.commandsAsync.verify({
-        app_id: process.env.NEXT_PUBLIC_APP_ID || '',
         action: WORLD_ID_ACTION,
         signal: registerHash,
-        verification_level: 'orb',
+        verification_level: VerificationLevel.Orb,
       });
       const proofPayload = verifyRes?.finalPayload;
       if (proofPayload?.status !== 'success') {
@@ -197,7 +196,7 @@ export const FileIntegrity = () => {
 
       setRegisterResult({
         success: true,
-        verifiedWalletAddress: userInfo.walletAddress,
+        verifiedWalletAddress: walletAddress,
         worldid,
         timestamp,
         usedZzin,
