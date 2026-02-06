@@ -4,7 +4,8 @@ import { MiniKit } from '@worldcoin/minikit-js';
 
 export default function Home() {
   const [mode, setMode] = useState<'login' | 'menu' | 'camera' | 'preview' | 'result' | 'verify' | 'verify_result' | 'verify_fail'>('login');
-  const [userAddress, setUserAddress] = useState<string | null>(null);
+  const [isHumanVerified, setIsHumanVerified] = useState(false);
+  const [humanVerifyStatus, setHumanVerifyStatus] = useState<string | null>(null);
 
   // 카메라 & 이미지
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
@@ -23,15 +24,45 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- 1. 로그인 ---
-  const signInWithWallet = async () => {
+  const verifyHumanity = async () => {
     if (!MiniKit.isInstalled()) { alert("World App 필요"); return; }
     setIsLoading(true);
+    setHumanVerifyStatus('인간 인증 진행 중...');
     try {
-      const res = await MiniKit.commandsAsync.signMessage({ message: `Login ZZIN ${Date.now()}` });
-      setUserAddress(res.commandPayload?.address || "0x71C...3A29");
+      const res = await MiniKit.commandsAsync.verify({
+        action: 'orbgate',
+        signal: `login-${Date.now()}`,
+        verification_level: 'orb'
+      });
+      const verified = res?.finalPayload;
+      if (verified?.status !== 'success') throw new Error('Verification rejected');
+
+      // 서버측 검증 (verifyCloudProof) 호출
+      const serverRes = await fetch('/api/verify-proof', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payload: verified,
+          action: 'orbgate',
+          signal: verified.signal,
+        })
+      });
+      const serverJson = await serverRes.json();
+      if (!serverRes.ok || !serverJson?.verifyRes?.success) {
+        throw new Error('Server verification failed');
+      }
+
+      setIsHumanVerified(true);
+      setHumanVerifyStatus('인증 완료');
       setMode('menu');
-    } catch { setUserAddress("0x71C...3A29"); setMode('menu'); } 
-    finally { setIsLoading(false); }
+    } catch (err) {
+      console.warn('Human verification failed or cancelled', err);
+      setIsHumanVerified(false);
+      setHumanVerifyStatus('인증 실패 또는 취소됨');
+      alert('Orb 인증을 완료해야 진행 가능합니다.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // --- 2. 카메라 시작 ---
@@ -80,13 +111,25 @@ export default function Home() {
     setStatus('온체인 데이터 생성 중...');
 
     const imageHash = tempImage.slice(-15);
-    const qrPayload = `ZZIN:${userAddress?.slice(0,6)}:${imageHash}`;
+    const qrPayload = `ZZIN:HUMAN:${imageHash}`;
 
     try {
-        try { await MiniKit.commandsAsync.signMessage({ message: qrPayload }); } catch(e) {}
-        setStatus('워터마크 합성 중...');
-        await generateGhostQR(tempImage, qrPayload);
-    } catch (e) { setIsLoading(false); }
+        const res = await MiniKit.commandsAsync.signMessage({ message: qrPayload });
+        const signed = res?.finalPayload;
+        if (signed?.status !== 'success') throw new Error('Signature rejected');
+    } catch (err) {
+        setIsLoading(false);
+        console.warn('User cancelled signing QR payload', err);
+        alert('서명을 완료해야 워터마크를 생성할 수 있습니다.');
+        return;
+    }
+
+    try {
+      setStatus('워터마크 합성 중...');
+      await generateGhostQR(tempImage, qrPayload);
+    } catch (e) { 
+      setIsLoading(false); 
+    }
   };
 
   const generateGhostQR = async (imgSrc: string, text: string) => {
@@ -155,7 +198,7 @@ export default function Home() {
       const realFileTime = new Date(file.lastModified).toLocaleString();
 
       setVerifiedData({
-          creator: isZZINFile ? (userAddress || "0x71C...3A29") : "UNKNOWN",
+          creator: isZZINFile ? "HUMAN_VERIFIED" : "UNKNOWN",
           time: realFileTime,
           isZZIN: isZZINFile
       });
@@ -180,9 +223,18 @@ export default function Home() {
   if (mode === 'login') return (
     <div className="flex flex-col h-[100dvh] bg-black items-center justify-center p-8 text-center text-white">
       <h1 className="text-8xl font-black italic tracking-tighter mb-4">ZZIN.</h1>
-      <button onClick={signInWithWallet} disabled={isLoading} className="w-full py-6 bg-white text-black text-xl font-bold rounded-full active:scale-95 transition-all">
-        {isLoading ? "Connecting..." : "Connect Wallet"}
-      </button>
+      <div className="space-y-3 w-full">
+        <button 
+          onClick={verifyHumanity} 
+          disabled={isLoading} 
+          className={`w-full py-4 text-lg font-bold rounded-full active:scale-95 transition-all ${isHumanVerified ? 'bg-[#00ffcc] text-black' : 'bg-white text-black'}`}
+        >
+          {isLoading ? "Verifying..." : (isHumanVerified ? "Orb Verified" : "Verify with World ID")}
+        </button>
+        {humanVerifyStatus && (
+          <p className="text-xs text-zinc-400">{humanVerifyStatus}</p>
+        )}
+      </div>
     </div>
   );
 
@@ -193,7 +245,7 @@ export default function Home() {
           <div className="flex justify-between items-center mb-10">
             <h1 className="text-6xl font-black italic tracking-tighter">ZZIN.</h1>
             <div className="px-3 py-1 border border-zinc-800 rounded-full text-xs font-mono text-zinc-400">
-                {userAddress ? `${userAddress.slice(0,4)}...Connected` : 'Guest'}
+                {isHumanVerified ? 'Orb Verified' : 'Guest'}
             </div>
           </div>
           <div className="space-y-6">
