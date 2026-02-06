@@ -1,6 +1,5 @@
 import { auth } from '@/auth';
 import ClientProviders from '@/providers';
-import '@worldcoin/mini-apps-ui-kit-react/styles.css';
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
