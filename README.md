@@ -37,16 +37,16 @@ This template was made with help from the amazing [supercorp-ai](https://github.
 This project now includes a file integrity flow:
 
 1. Compute `Keccak-256` hash in the browser
-2. Verify wallet via Address Book (`getIsUserVerified`)
+2. Generate a World ID proof in World App (`MiniKit.commandsAsync.verify`)
 3. Submit transaction from the user wallet (`MiniKit.commandsAsync.sendTransaction`)
-4. Verify hash ownership via `POST /api/verify-file`
+4. Verify hash registration via `POST /api/verify-file` (original or certificate hash)
 
-Transaction payload fields (`registerFile`):
+Transaction payload fields (stored under the **original** hash):
 - `worldid`: username from `MiniKit.getUserByAddress(userAddress).username`
 - `timestamp`: photo creation timestamp (unix seconds)
 - `usedZzin`: whether created with ZZIN (`true` / `false`)
 
-Verification output fields (`map[imageHash]`):
+Verification output fields (resolved from `inputHash -> originalHash`):
 - `location`
 - `worldid`
 - `timestamp`
@@ -58,7 +58,10 @@ Verification output fields (`map[imageHash]`):
 - Contract: `contracts/FileRegistry.sol`
 - ABI: `src/abi/FileRegistry.json`
 - Core functions:
-  - `registerFile(bytes32 _fileHash, string _worldid, uint256 _timestamp, bool _usedZzin)`
+  - `registerFile(bytes32 _originalHash, string _worldid, uint256 _timestamp, bool _usedZzin, uint256 _root, uint256 _nullifierHash, uint256[8] _proof)`
+  - `registerFileWithCertificate(bytes32 _originalHash, bytes32 _certifiedHash, string _worldid, uint256 _timestamp, bool _usedZzin, uint256 _root, uint256 _nullifierHash, uint256[8] _proof)`
+  - `linkCertificate(bytes32 _originalHash, bytes32 _certifiedHash)`
+  - `resolveOriginalHash(bytes32 _anyHash)`
   - `getImageMetadata(bytes32 _fileHash)`
   - `getFileOwner(bytes32 _fileHash)`
   - `isFileRegistered(bytes32 _fileHash)`
@@ -73,6 +76,9 @@ cat .tmp-solc/contracts_FileRegistry_sol_FileRegistry.abi | jq '.' > src/abi/Fil
 ### Deploy Test Contract (Worldchain Sepolia)
 
 1. Prepare a funded deployer private key for Worldchain Sepolia.
+2. Set World ID config env (used to compute external nullifier):
+   - `WORLD_ID_APP_ID` (or set `NEXT_PUBLIC_APP_ID`)
+   - `WORLD_ID_ACTION` (default: `orbgate`)
 2. Run:
 
 ```bash

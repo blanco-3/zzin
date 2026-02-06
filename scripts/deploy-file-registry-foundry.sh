@@ -6,9 +6,17 @@ ENV_LOCAL_FILE="$ROOT_DIR/.env.local"
 WORLDCHAIN_SEPOLIA_RPC_URL="${WORLDCHAIN_SEPOLIA_RPC_URL:-https://worldchain-sepolia.g.alchemy.com/public}"
 WORLDCHAIN_SEPOLIA_EXPLORER_BASE_URL="${WORLDCHAIN_SEPOLIA_EXPLORER_BASE_URL:-https://sepolia.worldscan.org}"
 DEPLOYER_PRIVATE_KEY="${DEPLOYER_PRIVATE_KEY:-}"
+WORLD_ID_ROUTER="${WORLD_ID_ROUTER:-0x57f928158C3EE7CDad1e4D8642503c4D0201f611}"
+WORLD_ID_APP_ID="${WORLD_ID_APP_ID:-${NEXT_PUBLIC_APP_ID:-}}"
+WORLD_ID_ACTION="${WORLD_ID_ACTION:-orbgate}"
 
 if [[ -z "$DEPLOYER_PRIVATE_KEY" ]]; then
   echo "Missing DEPLOYER_PRIVATE_KEY"
+  exit 1
+fi
+
+if [[ -z "$WORLD_ID_APP_ID" ]]; then
+  echo "Missing WORLD_ID_APP_ID (or NEXT_PUBLIC_APP_ID)"
   exit 1
 fi
 
@@ -25,6 +33,7 @@ DEPLOY_OUTPUT="$(
     forge create contracts/FileRegistry.sol:FileRegistry \
       --rpc-url "$WORLDCHAIN_SEPOLIA_RPC_URL" \
       --private-key "$DEPLOYER_PRIVATE_KEY" \
+      --constructor-args "$WORLD_ID_ROUTER" "$WORLD_ID_APP_ID" "$WORLD_ID_ACTION" \
       --broadcast
 )"
 

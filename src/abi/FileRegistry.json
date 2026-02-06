@@ -1,12 +1,77 @@
 [
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_worldId",
+        "type": "address"
+      },
+      {
+        "internalType": "string",
+        "name": "_appId",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "_action",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
     "anonymous": false,
     "inputs": [
-      { "indexed": true, "internalType": "bytes32", "name": "fileHash", "type": "bytes32" },
-      { "indexed": true, "internalType": "address", "name": "fileOwner", "type": "address" },
-      { "indexed": false, "internalType": "string", "name": "worldid", "type": "string" },
-      { "indexed": false, "internalType": "uint256", "name": "timestamp", "type": "uint256" },
-      { "indexed": false, "internalType": "bool", "name": "usedZzin", "type": "bool" }
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "originalHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "certifiedHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "CertifiedLinked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "originalHash",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "fileOwner",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "worldid",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "usedZzin",
+        "type": "bool"
+      }
     ],
     "name": "FileRegistered",
     "type": "event"
@@ -14,94 +79,333 @@
   {
     "inputs": [],
     "name": "WORLD_ID_GROUP_ID",
-    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "certifiedToOriginal",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
     "stateMutability": "view",
     "type": "function"
   },
   {
     "inputs": [],
     "name": "externalNullifier",
-    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
-    "name": "fileOwner",
-    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "bytes32", "name": "_fileHash", "type": "bytes32" }],
-    "name": "getFileOwner",
-    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "bytes32", "name": "_fileHash", "type": "bytes32" }],
-    "name": "getImageMetadata",
     "outputs": [
-      { "internalType": "string", "name": "location", "type": "string" },
-      { "internalType": "string", "name": "worldid", "type": "string" },
-      { "internalType": "uint256", "name": "timestamp", "type": "uint256" },
-      { "internalType": "bool", "name": "usedZzin", "type": "bool" },
-      { "internalType": "bool", "name": "exists", "type": "bool" }
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
     ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "bytes32", "name": "_fileHash", "type": "bytes32" }],
-    "name": "isFileRegistered",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "uint256", "name": "_nullifierHash", "type": "uint256" }],
-    "name": "isNullifierUsed",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
-    "name": "isRegistered",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }],
-    "name": "map",
-    "outputs": [
-      { "internalType": "string", "name": "location", "type": "string" },
-      { "internalType": "string", "name": "worldid", "type": "string" },
-      { "internalType": "uint256", "name": "timestamp", "type": "uint256" },
-      { "internalType": "bool", "name": "usedZzin", "type": "bool" },
-      { "internalType": "bool", "name": "exists", "type": "bool" }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
-    "name": "nullifierHashes",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
     "stateMutability": "view",
     "type": "function"
   },
   {
     "inputs": [
-      { "internalType": "bytes32", "name": "_fileHash", "type": "bytes32" },
-      { "internalType": "string", "name": "_worldid", "type": "string" },
-      { "internalType": "uint256", "name": "_timestamp", "type": "uint256" },
-      { "internalType": "bool", "name": "_usedZzin", "type": "bool" },
-      { "internalType": "uint256", "name": "_root", "type": "uint256" },
-      { "internalType": "uint256", "name": "_nullifierHash", "type": "uint256" },
-      { "internalType": "uint256[8]", "name": "_proof", "type": "uint256[8]" }
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "fileOwner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "firstCertified",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_fileHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getFileOwner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_fileHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "getImageMetadata",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "location",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "worldid",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "usedZzin",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "exists",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_fileHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "isFileRegistered",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_nullifierHash",
+        "type": "uint256"
+      }
+    ],
+    "name": "isNullifierUsed",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "isRegistered",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_originalHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "_certifiedHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "linkCertificate",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "map",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "location",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "worldid",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "usedZzin",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "exists",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "nextCertified",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "nullifierHashes",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_originalHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string",
+        "name": "_worldid",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_timestamp",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "_usedZzin",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_root",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_nullifierHash",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256[8]",
+        "name": "_proof",
+        "type": "uint256[8]"
+      }
     ],
     "name": "registerFile",
     "outputs": [],
@@ -109,9 +413,82 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_originalHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "_certifiedHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "string",
+        "name": "_worldid",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_timestamp",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "_usedZzin",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_root",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_nullifierHash",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256[8]",
+        "name": "_proof",
+        "type": "uint256[8]"
+      }
+    ],
+    "name": "registerFileWithCertificate",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "_anyHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "resolveOriginalHash",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "originalHash",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "worldId",
-    "outputs": [{ "internalType": "contract IWorldID", "name": "", "type": "address" }],
+    "outputs": [
+      {
+        "internalType": "contract IWorldID",
+        "name": "",
+        "type": "address"
+      }
+    ],
     "stateMutability": "view",
     "type": "function"
   }

@@ -21,30 +21,62 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const hash = normalizeFileHash(body.fileHash);
+    const inputHash = normalizeFileHash(body.fileHash);
     const contractAddress = getFileRegistryContractAddress();
     const publicClient = getFileRegistryPublicClient();
 
-    const [location, worldid, timestamp, usedZzin, exists] =
-      (await publicClient.readContract({
-        address: contractAddress,
-        abi: fileRegistryAbi,
-        functionName: 'getImageMetadata',
-        args: [hash],
-      })) as [string, string, bigint, boolean, boolean];
+    const originalHash = (await publicClient.readContract({
+      address: contractAddress,
+      abi: fileRegistryAbi,
+      functionName: 'resolveOriginalHash',
+      args: [inputHash],
+    })) as string;
+
+    const resolved =
+      originalHash &&
+      typeof originalHash === 'string' &&
+      originalHash !== '0x0000000000000000000000000000000000000000000000000000000000000000'
+        ? (originalHash as `0x${string}`)
+        : null;
+
+    if (!resolved) {
+      return NextResponse.json({
+        success: true,
+        inputHash,
+        resolvedOriginalHash: null,
+        registered: false,
+        location: null,
+        worldid: null,
+        timestamp: null,
+        usedZzin: null,
+        owner: null,
+        isCertified: null,
+      });
+    }
+
+    const isCertified = resolved.toLowerCase() !== inputHash.toLowerCase();
+
+    const [location, worldid, timestamp, usedZzin, exists] = (await publicClient.readContract({
+      address: contractAddress,
+      abi: fileRegistryAbi,
+      functionName: 'getImageMetadata',
+      args: [resolved],
+    })) as [string, string, bigint, boolean, boolean];
 
     const owner = await publicClient.readContract({
       address: contractAddress,
       abi: fileRegistryAbi,
       functionName: 'getFileOwner',
-      args: [hash],
+      args: [resolved],
     });
 
     const registered = Boolean(exists) && owner !== zeroAddress;
 
     return NextResponse.json({
       success: true,
-      fileHash: hash,
+      inputHash,
+      resolvedOriginalHash: resolved,
+      isCertified,
       registered,
       location: registered ? location : null,
       worldid: registered ? worldid : null,

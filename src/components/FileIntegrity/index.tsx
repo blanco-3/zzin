@@ -2,7 +2,7 @@
 
 import FileRegistryABI from '@/abi/FileRegistry.json';
 import { Button } from '@worldcoin/mini-apps-ui-kit-react';
-import { MiniKit } from '@worldcoin/minikit-js';
+import { MiniKit, VerificationLevel } from '@worldcoin/minikit-js';
 import { useWaitForTransactionReceipt } from '@worldcoin/minikit-react';
 import { useEffect, useState } from 'react';
 import { createPublicClient, decodeAbiParameters, http, keccak256, toHex } from 'viem';
@@ -34,6 +34,9 @@ interface RegisterResponse {
 interface VerifyResponse {
   success: boolean;
   error?: string;
+  inputHash?: string;
+  resolvedOriginalHash?: string | null;
+  isCertified?: boolean | null;
   registered?: boolean;
   location?: string | null;
   worldid?: string | null;
@@ -156,10 +159,9 @@ export const FileIntegrity = () => {
 
       // World ID proof (Orb) bound to the file hash
       const verifyRes = await MiniKit.commandsAsync.verify({
-        app_id: process.env.NEXT_PUBLIC_APP_ID || '',
         action: WORLD_ID_ACTION,
         signal: registerHash,
-        verification_level: 'orb',
+        verification_level: VerificationLevel.Orb,
       });
       const proofPayload = verifyRes?.finalPayload;
       if (proofPayload?.status !== 'success') {
@@ -378,8 +380,23 @@ export const FileIntegrity = () => {
         {verifyResult?.success && (
           <div className="grid gap-1 text-xs">
             <p>
-              상태: {verifyResult.registered ? '등록된 원본 파일' : '미등록 파일'}
+              상태:{' '}
+              {verifyResult.registered
+                ? verifyResult.isCertified
+                  ? '등록된 인증서 해시 (원본으로 resolve)'
+                  : '등록된 원본 해시'
+                : '미등록 파일'}
             </p>
+            {verifyResult.registered && (
+              <p className="break-all">
+                Input Hash: {verifyResult.inputHash || verifyHash}
+              </p>
+            )}
+            {verifyResult.registered && verifyResult.resolvedOriginalHash && (
+              <p className="break-all">
+                Original Hash: {verifyResult.resolvedOriginalHash}
+              </p>
+            )}
             {verifyResult.registered && (
               <p className="break-all">Location: {verifyResult.location}</p>
             )}

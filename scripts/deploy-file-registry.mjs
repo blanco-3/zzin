@@ -9,6 +9,33 @@ const rootDir = process.cwd();
 const tempBuildDir = path.join(rootDir, '.tmp-solc');
 const envLocalPath = path.join(rootDir, '.env.local');
 
+const loadEnvLocal = () => {
+  if (!fs.existsSync(envLocalPath)) return;
+  const raw = fs.readFileSync(envLocalPath, 'utf8');
+  const lines = raw.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf('=');
+    if (idx < 1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    let value = trimmed.slice(idx + 1).trim();
+    if (
+      (value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"'))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+};
+
+// Allow local, non-committed env config (e.g. DEPLOYER_PRIVATE_KEY) without
+// requiring users to inline secrets in shell commands.
+loadEnvLocal();
+
 const chainByKey = {
   worldchain,
   worldchainSepolia,
@@ -28,6 +55,31 @@ const deployerPrivateKey = process.env.DEPLOYER_PRIVATE_KEY;
 
 if (!deployerPrivateKey || !/^0x[0-9a-fA-F]{64}$/.test(deployerPrivateKey)) {
   throw new Error('Missing or invalid DEPLOYER_PRIVATE_KEY');
+}
+
+const worldIdRouterByChainKey = {
+  worldchain: '0x17B354dD2595411ff79041f930e491A4Df39A278',
+  worldchainSepolia: '0x57f928158C3EE7CDad1e4D8642503c4D0201f611',
+};
+
+const worldIdRouter =
+  process.env.WORLD_ID_ROUTER ||
+  worldIdRouterByChainKey[deployChainKey];
+const worldIdAppId = process.env.WORLD_ID_APP_ID || process.env.NEXT_PUBLIC_APP_ID;
+const worldIdAction = process.env.WORLD_ID_ACTION || process.env.NEXT_PUBLIC_ACTION || 'orbgate';
+
+if (!worldIdRouter || !/^0x[0-9a-fA-F]{40}$/.test(worldIdRouter)) {
+  throw new Error(
+    `Missing or invalid WORLD_ID_ROUTER. Provide env WORLD_ID_ROUTER, or use a supported DEPLOY_CHAIN (${Object.keys(worldIdRouterByChainKey).join(
+      ', ',
+    )}).`,
+  );
+}
+if (!worldIdAppId || !/^app_[a-zA-Z0-9]+$/.test(worldIdAppId)) {
+  throw new Error('Missing or invalid WORLD_ID_APP_ID (expected like app_xxx)');
+}
+if (!worldIdAction || typeof worldIdAction !== 'string') {
+  throw new Error('Missing WORLD_ID_ACTION');
 }
 
 const compileContract = () => {
@@ -103,6 +155,7 @@ const main = async () => {
     abi,
     bytecode,
     account,
+    args: [worldIdRouter, worldIdAppId, worldIdAction],
   });
 
   console.log(`Deploy tx submitted: ${deployTxHash}`);
