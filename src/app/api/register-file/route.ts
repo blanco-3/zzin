@@ -10,6 +10,7 @@ import { decodeAbiParameters, Hex, isAddress } from 'viem';
 
 interface RegisterFileRequest {
   fileHash?: string;
+  certHash?: string;
   walletAddress?: string;
   worldid?: string;
   timestamp?: number;
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
       typeof body.timestamp === 'number' ? Math.floor(body.timestamp) : undefined;
     const usedZzin =
       typeof body.usedZzin === 'boolean' ? body.usedZzin : undefined;
+    const certHash = body.certHash ? normalizeFileHash(body.certHash) : hash;
 
     if (!worldid) {
       return NextResponse.json(
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
       address: contractAddress,
       abi: fileRegistryAbi,
       functionName: 'registerFile',
-      args: [hash, worldid, BigInt(timestamp), usedZzin, root, nullifierHash, proof],
+      args: [hash, certHash, worldid, BigInt(timestamp), usedZzin, root, nullifierHash, proof],
       account,
     });
 

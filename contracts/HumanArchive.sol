@@ -48,15 +48,19 @@ contract FileRegistry {
     mapping(uint256 => bool) public nullifierHashes;
 
     struct ImageMetadata {
-        string location;
+        bytes32 originalHash;
+        bytes32 certHash;
         string worldid;
         uint256 timestamp;
         bool usedZzin;
         bool exists;
     }
 
-    mapping(bytes32 => ImageMetadata) public map;
-    mapping(bytes32 => bool) public isRegistered;
+    /// @dev original hash => metadata
+    mapping(bytes32 => ImageMetadata) public originalData;
+    /// @dev certified hash => original hash
+    mapping(bytes32 => bytes32) public certToOriginal;
+    /// @dev original hash => owner
     mapping(bytes32 => address) public fileOwner;
 
     constructor(address _worldId, uint256 _externalNullifier) {
@@ -67,7 +71,8 @@ contract FileRegistry {
     }
 
     event FileRegistered(
-        bytes32 indexed fileHash,
+        bytes32 indexed originalHash,
+        bytes32 indexed certHash,
         address indexed fileOwner,
         string worldid,
         uint256 timestamp,
@@ -84,11 +89,12 @@ contract FileRegistry {
      * @param _nullifierHash Nullifier hash to prevent proof reuse.
      * @param _proof World ID zero-knowledge proof.
      *
-     * Signal binding: the `signal` for the proof must be the `_fileHash` (bytes32),
-     * hashed to field via `hashToField(abi.encodePacked(_fileHash))`.
+     * Signal binding: the `signal` for the proof must be the `_originalHash` (bytes32),
+     * hashed to field via `hashToField(abi.encodePacked(_originalHash))`.
      */
     function registerFile(
-        bytes32 _fileHash,
+        bytes32 _originalHash,
+        bytes32 _certHash,
         string calldata _worldid,
         uint256 _timestamp,
         bool _usedZzin,
@@ -96,14 +102,16 @@ contract FileRegistry {
         uint256 _nullifierHash,
         uint256[8] calldata _proof
     ) external {
-        require(_fileHash != bytes32(0), "Invalid hash");
-        require(!isRegistered[_fileHash], "Hash already registered");
+        require(_originalHash != bytes32(0), "Invalid original hash");
+        require(_certHash != bytes32(0), "Invalid cert hash");
+        require(!originalData[_originalHash].exists, "Original already registered");
+        require(certToOriginal[_certHash] == bytes32(0), "Cert already mapped");
         require(bytes(_worldid).length > 0, "Invalid worldid");
         require(_timestamp > 0, "Invalid timestamp");
         require(!nullifierHashes[_nullifierHash], "Nullifier already used");
 
-        // Bind the proof to this file hash as the signal.
-        uint256 signalHash = abi.encodePacked(_fileHash).hashToField();
+        // Bind the proof to the original file hash as the signal.
+        uint256 signalHash = abi.encodePacked(_originalHash).hashToField();
 
         worldId.verifyProof(
             _root,
@@ -118,48 +126,87 @@ contract FileRegistry {
 
         string memory location = _usedZzin ? "zzin" : "external";
 
-        isRegistered[_fileHash] = true;
-        map[_fileHash] = ImageMetadata({
-            location: location,
+        certToOriginal[_certHash] = _originalHash;
+        originalData[_originalHash] = ImageMetadata({
+            originalHash: _originalHash,
+            certHash: _certHash,
             worldid: _worldid,
             timestamp: _timestamp,
             usedZzin: _usedZzin,
             exists: true
         });
-        fileOwner[_fileHash] = msg.sender;
-        emit FileRegistered(_fileHash, msg.sender, _worldid, _timestamp, _usedZzin);
+        fileOwner[_originalHash] = msg.sender;
+        emit FileRegistered(
+            _originalHash,
+            _certHash,
+            msg.sender,
+            _worldid,
+            _timestamp,
+            _usedZzin
+        );
     }
 
     function getFileOwner(bytes32 _fileHash) external view returns (address) {
-        return fileOwner[_fileHash];
+        if (fileOwner[_fileHash] != address(0)) return fileOwner[_fileHash];
+        bytes32 originalHash = certToOriginal[_fileHash];
+        return fileOwner[originalHash];
     }
 
     function isFileRegistered(bytes32 _fileHash) external view returns (bool) {
-        return isRegistered[_fileHash];
+        if (originalData[_fileHash].exists) return true;
+        bytes32 originalHash = certToOriginal[_fileHash];
+        return originalHash != bytes32(0) && originalData[originalHash].exists;
     }
 
     function getImageMetadata(bytes32 _fileHash)
         external
         view
         returns (
-            string memory location,
+            bytes32 originalHash,
+            bytes32 certHash,
             string memory worldid,
             uint256 timestamp,
             bool usedZzin,
             bool exists
         )
     {
-        ImageMetadata memory metadata = map[_fileHash];
-        return (
-            metadata.location,
-            metadata.worldid,
-            metadata.timestamp,
-            metadata.usedZzin,
-            metadata.exists
-        );
+        ImageMetadata memory metadata = originalData[_fileHash];
+        if (!metadata.exists) {
+            bytes32 orig = certToOriginal[_fileHash];
+            if (orig != bytes32(0)) {
+                metadata = originalData[orig];
+            }
+        }
+        return (metadata.originalHash, metadata.certHash, metadata.worldid, metadata.timestamp, metadata.usedZzin, metadata.exists);
     }
 
     function isNullifierUsed(uint256 _nullifierHash) external view returns (bool) {
         return nullifierHashes[_nullifierHash];
+    }
+
+    /**
+     * @notice Verify an image (bytes) and return the stored metadata (original).
+     * @dev If a certified image is provided, it is mapped back to the original.
+     */
+    function verify(bytes memory image) public view returns (ImageMetadata memory) {
+        bytes32 hash = keccak256(image);
+
+        if (originalData[hash].exists) {
+            return originalData[hash];
+        }
+
+        bytes32 originalHash = certToOriginal[hash];
+        if (originalHash != bytes32(0)) {
+            return originalData[originalHash];
+        }
+
+        return ImageMetadata({
+            originalHash: bytes32(0),
+            certHash: bytes32(0),
+            worldid: "",
+            timestamp: 0,
+            usedZzin: false,
+            exists: false
+        });
     }
 }

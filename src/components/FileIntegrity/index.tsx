@@ -35,7 +35,8 @@ interface VerifyResponse {
   success: boolean;
   error?: string;
   registered?: boolean;
-  location?: string | null;
+  originalHash?: string | null;
+  certHash?: string | null;
   worldid?: string | null;
   timestamp?: string | null;
   usedZzin?: boolean | null;
@@ -154,7 +155,7 @@ export const FileIntegrity = () => {
         ? Math.floor(registerFile.lastModified / 1000) || Math.floor(Date.now() / 1000)
         : Math.floor(Date.now() / 1000);
 
-      // World ID proof (Orb) bound to the file hash
+      // World ID proof (Orb) bound to the file hash (use same hash for original/cert in this flow)
       const verifyRes = await MiniKit.commandsAsync.verify({
         app_id: process.env.NEXT_PUBLIC_APP_ID || '',
         action: WORLD_ID_ACTION,
@@ -180,7 +181,8 @@ export const FileIntegrity = () => {
             abi: FileRegistryABI,
             functionName: 'registerFile',
             args: [
-              registerHash,
+              registerHash, // original
+              registerHash, // cert (same as original in this manual flow)
               worldid,
               BigInt(timestamp),
               usedZzin,
@@ -381,7 +383,10 @@ export const FileIntegrity = () => {
               상태: {verifyResult.registered ? '등록된 원본 파일' : '미등록 파일'}
             </p>
             {verifyResult.registered && (
-              <p className="break-all">Location: {verifyResult.location}</p>
+              <p className="break-all">Original Hash: {verifyResult.originalHash}</p>
+            )}
+            {verifyResult.registered && (
+              <p className="break-all">Certified Hash: {verifyResult.certHash}</p>
             )}
             {verifyResult.registered && (
               <p className="break-all">WorldID: {verifyResult.worldid}</p>

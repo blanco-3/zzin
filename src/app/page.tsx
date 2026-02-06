@@ -25,6 +25,7 @@ export default function Home() {
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [tempImage, setTempImage] = useState<string | null>(null); 
   const [finalImage, setFinalImage] = useState<string | null>(null);
+  const [certifiedImage, setCertifiedImage] = useState<string | null>(null); // watermarked/template image
   
   // 상태
   const [isLoading, setIsLoading] = useState(false);
@@ -49,7 +50,8 @@ export default function Home() {
   const [verifiedData, setVerifiedData] = useState<{
     registered: boolean;
     fileHash: string;
-    location?: string;
+    originalHash?: string | null;
+    certHash?: string | null;
     worldid?: string;
     timestamp?: number;
     usedZzin?: boolean;
@@ -162,6 +164,7 @@ export default function Home() {
   const confirmCapture = () => {
     if (!tempImage) return;
     setFinalImage(tempImage);
+    setCertifiedImage(null);
     setChainRegistration(null);
     setChainRegistrationError(null);
     setMode('register_prompt');
@@ -199,7 +202,10 @@ export default function Home() {
 
       const walletAddress = await getMiniAppWalletAddress();
 
-      const fileHash = await hashImage(finalImage);
+      // original hash: tempImage (pre-template) if available, otherwise finalImage
+      const originalHash = await hashImage(tempImage || finalImage);
+      // certified hash: final templated image if available, otherwise original
+      const certHash = await hashImage(certifiedImage || finalImage);
       const worldIdUser = await MiniKit.getUserByAddress(walletAddress);
       const worldid = worldIdUser.username || walletAddress;
       const timestamp = capturedTimestamp || Math.floor(Date.now() / 1000);
@@ -209,7 +215,7 @@ export default function Home() {
       const verifyRes = await MiniKit.commandsAsync.verify({
         app_id: process.env.NEXT_PUBLIC_APP_ID || '',
         action: WORLD_ID_ACTION,
-        signal: fileHash,
+        signal: originalHash,
         verification_level: 'orb',
       });
       const proofPayload = verifyRes?.finalPayload;
@@ -232,7 +238,8 @@ export default function Home() {
             abi: FileRegistryABI,
             functionName: 'registerFile',
             args: [
-              fileHash,
+              originalHash,
+              certHash,
               worldid,
               BigInt(timestamp),
               usedZzin,
@@ -248,7 +255,9 @@ export default function Home() {
       }
 
       setChainRegistration({
-        fileHash,
+        fileHash: originalHash,
+        originalHash,
+        certHash,
         verifiedWalletAddress: walletAddress,
         worldid,
         timestamp,
@@ -323,7 +332,8 @@ export default function Home() {
         setVerifiedData({
           registered: Boolean(data.registered),
           fileHash,
-          location: data.location || undefined,
+          originalHash: data.originalHash || null,
+          certHash: data.certHash || null,
           worldid: data.worldid || undefined,
           timestamp:
             typeof data.timestamp === 'string'
@@ -344,6 +354,7 @@ export default function Home() {
     setMode('menu');
     setTempImage(null);
     setFinalImage(null);
+    setCertifiedImage(null);
     setVerifiedData(null);
     setVerifyError(null);
     setChainRegistration(null);

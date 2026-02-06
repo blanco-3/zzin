@@ -25,13 +25,13 @@ export async function POST(req: NextRequest) {
     const contractAddress = getFileRegistryContractAddress();
     const publicClient = getFileRegistryPublicClient();
 
-    const [location, worldid, timestamp, usedZzin, exists] =
+    const [originalHash, certHash, worldid, timestamp, usedZzin, exists] =
       (await publicClient.readContract({
         address: contractAddress,
         abi: fileRegistryAbi,
         functionName: 'getImageMetadata',
         args: [hash],
-      })) as [string, string, bigint, boolean, boolean];
+      })) as [string, string, string, bigint, boolean, boolean];
 
     const owner = await publicClient.readContract({
       address: contractAddress,
@@ -46,7 +46,8 @@ export async function POST(req: NextRequest) {
       success: true,
       fileHash: hash,
       registered,
-      location: registered ? location : null,
+      originalHash: registered ? originalHash : null,
+      certHash: registered ? certHash : null,
       worldid: registered ? worldid : null,
       timestamp: registered ? timestamp.toString() : null,
       usedZzin: registered ? usedZzin : null,
