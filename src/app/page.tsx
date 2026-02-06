@@ -28,10 +28,12 @@ export default function Home() {
     if (!MiniKit.isInstalled()) { alert("World App 필요"); return; }
     setIsLoading(true);
     setHumanVerifyStatus('인간 인증 진행 중...');
+    const verifySignal = `login-${Date.now()}`;
     try {
       const res = await MiniKit.commandsAsync.verify({
+        app_id: process.env.NEXT_PUBLIC_APP_ID as `app_${string}`,
         action: 'orbgate',
-        signal: `login-${Date.now()}`,
+        signal: verifySignal,
         verification_level: 'orb'
       });
       const verified = res?.finalPayload;
@@ -44,12 +46,14 @@ export default function Home() {
         body: JSON.stringify({
           payload: verified,
           action: 'orbgate',
-          signal: verified.signal,
+          signal: verifySignal,
         })
       });
       const serverJson = await serverRes.json();
       if (!serverRes.ok || !serverJson?.verifyRes?.success) {
-        throw new Error('Server verification failed');
+        const code = serverJson?.verifyRes?.code || 'unknown_error';
+        const detail = serverJson?.verifyRes?.detail || '';
+        throw new Error(`Server verification failed: ${code} ${detail}`);
       }
 
       setIsHumanVerified(true);

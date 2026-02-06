@@ -38,6 +38,13 @@ export async function POST(req: NextRequest) {
     if (verifyRes.success) {
       return NextResponse.json({ verifyRes }, { status: 200 });
     } else {
+      console.warn('verifyCloudProof failure', {
+        action,
+        signal,
+        code: verifyRes.code,
+        detail: verifyRes.detail,
+        attribute: verifyRes.attribute,
+      });
       return NextResponse.json({ verifyRes }, { status: 400 });
     }
   } catch (err) {
