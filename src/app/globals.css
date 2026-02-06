@@ -1,26 +1,173 @@
 @import 'tailwindcss';
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --leica-red: #D92027;
+  --body-bg: #111;
+  --leather-bg: #1a1a1a;
+  --silver: #c0c0c0;
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --font-inter: 'Inter', sans-serif;
+  --font-jetbrains: 'JetBrains Mono', monospace;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--body-bg);
+  --color-foreground: #ededed;
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
+  --color-leica-red: var(--leica-red);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ── Base ── */
+body {
+  background: var(--body-bg);
+  color: #ededed;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Typography ── */
+.font-cam {
+  font-family: var(--font-jetbrains), monospace;
+}
+
+/* ── Textures ── */
+.bg-leather {
+  background-color: #1a1a1a;
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+.bg-metal {
+  background: linear-gradient(
+    135deg,
+    #2b2b2b 0%,
+    #333 40%,
+    #2b2b2b 60%,
+    #222 100%
+  );
+}
+
+/* ── Glassmorphism Panel ── */
+.glass-panel {
+  background: rgba(30, 30, 30, 0.7);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.25rem;
+}
+
+/* ── Shutter Button ── */
+.shutter-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #e63946, #D92027 60%, #a01a20);
+  border: 4px solid #444;
+  box-shadow:
+    0 0 0 3px #222,
+    0 4px 20px rgba(217, 32, 39, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.1s;
+  position: relative;
+}
+
+.shutter-btn:active {
+  transform: scale(0.92);
+  box-shadow:
+    0 0 0 3px #222,
+    0 2px 8px rgba(217, 32, 39, 0.6);
+}
+
+.shutter-btn::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  pointer-events: none;
+}
+
+/* ── Animations ── */
+@keyframes lens-focus {
+  0% {
+    filter: blur(8px);
+    opacity: 0.6;
+  }
+  100% {
+    filter: blur(0);
+    opacity: 1;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.animate-focus {
+  animation: lens-focus 0.5s ease-out forwards;
+}
+
+@keyframes scan {
+  0% {
+    top: 0;
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+  100% {
+    top: 100%;
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out forwards;
+}
+
+@keyframes shutterFlash {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-shutter-flash {
+  animation: shutterFlash 0.15s ease-out forwards;
+}
+
+/* ── Material Symbols ── */
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 300,
+    'GRAD' 0,
+    'opsz' 24;
+  vertical-align: middle;
+}
+
+/* ── Scrollbar (dark) ── */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
 }
