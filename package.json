@@ -10,7 +10,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "forge:build": "forge build",
+    "deploy:file-registry:foundry:sepolia": "bash scripts/deploy-file-registry-foundry.sh",
+    "deploy:file-registry": "node scripts/deploy-file-registry.mjs",
+    "deploy:file-registry:mainnet": "DEPLOY_CHAIN=worldchain node scripts/deploy-file-registry.mjs",
+    "deploy:file-registry:sepolia": "DEPLOY_CHAIN=worldchainSepolia node scripts/deploy-file-registry.mjs"
   },
   "dependencies": {
     "@worldcoin/idkit": "^2.4.2",

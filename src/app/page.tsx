@@ -1,9 +1,22 @@
 'use client'
-import { useState, useRef, useEffect } from 'react';
-import { MiniKit } from '@worldcoin/minikit-js';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import FileRegistryABI from '@/abi/FileRegistry.json';
+import { getIsUserVerified, MiniKit, VerificationLevel } from '@worldcoin/minikit-js';
+import { useWaitForTransactionReceipt } from '@worldcoin/minikit-react';
+import { createPublicClient, http, keccak256, toHex } from 'viem';
+import { worldchain } from 'viem/chains';
+
+const DEFAULT_WORLDCHAIN_RPC_URL = 'https://worldchain-mainnet.g.alchemy.com/public';
+const FILE_REGISTRY_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_FILE_REGISTRY_CONTRACT_ADDRESS as `0x${string}` | undefined;
+const FILE_REGISTRY_RPC_URL = process.env.NEXT_PUBLIC_FILE_REGISTRY_RPC_URL || DEFAULT_WORLDCHAIN_RPC_URL;
+const FILE_REGISTRY_EXPLORER_BASE_URL = process.env.NEXT_PUBLIC_FILE_REGISTRY_EXPLORER_BASE_URL || 'https://worldscan.org';
+const fileRegistryPublicClient = createPublicClient({
+  chain: worldchain,
+  transport: http(FILE_REGISTRY_RPC_URL),
+});
 
 export default function Home() {
-  const [mode, setMode] = useState<'login' | 'menu' | 'camera' | 'preview' | 'result' | 'verify' | 'verify_result' | 'verify_fail'>('login');
+  const [mode, setMode] = useState<'login' | 'menu' | 'camera' | 'preview' | 'register_prompt' | 'result' | 'verify' | 'verify_result' | 'verify_fail'>('login');
   const [isHumanVerified, setIsHumanVerified] = useState(false);
   const [humanVerifyStatus, setHumanVerifyStatus] = useState<string | null>(null);
 
@@ -13,15 +26,51 @@ export default function Home() {
   const [finalImage, setFinalImage] = useState<string | null>(null);
   
   // 상태
-  const [status, setStatus] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState('PROCESSING...');
   const [isScanning, setIsScanning] = useState(false);
+  const [chainRegistrationError, setChainRegistrationError] = useState<string | null>(null);
+  const [chainRegistration, setChainRegistration] = useState<{
+    fileHash?: string;
+    verifiedWalletAddress?: string;
+    worldid?: string;
+    timestamp?: number;
+    usedZzin?: boolean;
+    transactionId?: string;
+    transactionHash?: string;
+    transactionUrl?: string;
+    network?: string;
+  } | null>(null);
+  const [transactionId, setTransactionId] = useState('');
+  const [capturedTimestamp, setCapturedTimestamp] = useState<number | null>(null);
   
-  // 검증된 데이터 (실제 파일 기반)
-  const [verifiedData, setVerifiedData] = useState<{ creator: string, time: string, isZZIN: boolean } | null>(null);
+  // 검증된 데이터 (온체인 매핑 기반)
+  const [verifiedData, setVerifiedData] = useState<{
+    registered: boolean;
+    fileHash: string;
+    location?: string;
+    worldid?: string;
+    timestamp?: number;
+    usedZzin?: boolean;
+    owner?: string | null;
+  } | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const {
+    transactionHash: confirmedTransactionHash,
+    isLoading: isConfirming,
+    isSuccess: isConfirmed,
+    isError: isConfirmError,
+    error: confirmError,
+  } = useWaitForTransactionReceipt({
+    client: fileRegistryPublicClient,
+    appConfig: {
+      app_id: process.env.NEXT_PUBLIC_APP_ID || '',
+    },
+    transactionId,
+  });
 
   // --- 1. 로그인 ---
   const verifyHumanity = async () => {
@@ -31,10 +80,9 @@ export default function Home() {
     const verifySignal = `login-${Date.now()}`;
     try {
       const res = await MiniKit.commandsAsync.verify({
-        app_id: process.env.NEXT_PUBLIC_APP_ID as `app_${string}`,
         action: 'orbgate',
         signal: verifySignal,
-        verification_level: 'orb'
+        verification_level: VerificationLevel.Orb,
       });
       const verified = res?.finalPayload;
       if (verified?.status !== 'success') throw new Error('Verification rejected');
@@ -70,7 +118,7 @@ export default function Home() {
   };
 
   // --- 2. 카메라 시작 ---
-  const startCamera = async () => {
+  const startCamera = useCallback(async () => {
     try {
       if (videoRef.current && videoRef.current.srcObject) {
         const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
@@ -83,12 +131,12 @@ export default function Home() {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => videoRef.current?.play();
       }
-    } catch (e) { console.error("Camera fail", e); }
-  };
+    } catch (err) { console.error("Camera fail", err); }
+  }, [facingMode]);
 
   useEffect(() => {
     if (mode === 'camera') startCamera();
-  }, [facingMode, mode]);
+  }, [mode, startCamera]);
 
   // --- 3. 촬영 ---
   const capturePhoto = () => {
@@ -105,67 +153,103 @@ export default function Home() {
     }
     ctx.drawImage(videoRef.current, 0, 0);
     setTempImage(canvas.toDataURL('image/jpeg', 1.0));
+    setCapturedTimestamp(Math.floor(Date.now() / 1000));
     setMode('preview');
   };
 
-  // --- 4. 서명 및 Ghost QR 생성 ---
-  const confirmAndSign = async () => {
+  // --- 4. 촬영 이미지 확정 ---
+  const confirmCapture = () => {
     if (!tempImage) return;
-    setIsLoading(true); 
-    setStatus('온체인 데이터 생성 중...');
+    setFinalImage(tempImage);
+    setChainRegistration(null);
+    setChainRegistrationError(null);
+    setMode('register_prompt');
+  };
 
-    const imageHash = tempImage.slice(-15);
-    const qrPayload = `ZZIN:HUMAN:${imageHash}`;
+  const hashImage = async (imageSrc: string) => {
+    const response = await fetch(imageSrc);
+    const blob = await response.blob();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    return keccak256(toHex(bytes));
+  };
 
-    try {
-        const res = await MiniKit.commandsAsync.signMessage({ message: qrPayload });
-        const signed = res?.finalPayload;
-        if (signed?.status !== 'success') throw new Error('Signature rejected');
-    } catch (err) {
-        setIsLoading(false);
-        console.warn('User cancelled signing QR payload', err);
-        alert('서명을 완료해야 워터마크를 생성할 수 있습니다.');
-        return;
+  const getMiniAppWalletAddress = async () => {
+    const userInfo = await MiniKit.getUserInfo();
+    if (!userInfo?.walletAddress) {
+      throw new Error('월렛 주소를 불러오지 못했습니다.');
     }
+    return userInfo.walletAddress;
+  };
+
+  const registerOnChain = async () => {
+    if (!finalImage) return;
+
+    setIsLoading(true);
+    setProcessingMessage('CHECKING WORLD ID...');
+    setChainRegistrationError(null);
 
     try {
-      setStatus('워터마크 합성 중...');
-      await generateGhostQR(tempImage, qrPayload);
-    } catch (e) { 
-      setIsLoading(false); 
+      if (!MiniKit.isInstalled()) {
+        throw new Error('World App 환경에서 실행하세요.');
+      }
+      if (!FILE_REGISTRY_CONTRACT_ADDRESS) {
+        throw new Error('NEXT_PUBLIC_FILE_REGISTRY_CONTRACT_ADDRESS가 필요합니다.');
+      }
+
+      const walletAddress = await getMiniAppWalletAddress();
+      const isVerifiedUser = await getIsUserVerified(
+        walletAddress,
+        FILE_REGISTRY_RPC_URL,
+      );
+      if (!isVerifiedUser) {
+        throw new Error('Address Book 기준 Orb 검증 지갑이 아닙니다.');
+      }
+
+      const fileHash = await hashImage(finalImage);
+      const worldIdUser = await MiniKit.getUserByAddress(walletAddress);
+      const worldid = worldIdUser.username || walletAddress;
+      const timestamp = capturedTimestamp || Math.floor(Date.now() / 1000);
+      const usedZzin = true;
+      setProcessingMessage('SUBMITTING TX...');
+      const { finalPayload } = await MiniKit.commandsAsync.sendTransaction({
+        transaction: [
+          {
+            address: FILE_REGISTRY_CONTRACT_ADDRESS,
+            abi: FileRegistryABI,
+            functionName: 'registerFile',
+            args: [fileHash, worldid, BigInt(timestamp), usedZzin],
+          },
+        ],
+      });
+      if (finalPayload.status !== 'success') {
+        throw new Error('트랜잭션이 거절되었거나 제출에 실패했습니다.');
+      }
+
+      setChainRegistration({
+        fileHash,
+        verifiedWalletAddress: walletAddress,
+        worldid,
+        timestamp,
+        usedZzin,
+        transactionId: finalPayload.transaction_id,
+        network: 'worldchain',
+      });
+      setTransactionId(finalPayload.transaction_id);
+      setMode('result');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '온체인 등록 실패';
+      setChainRegistrationError(message);
+    } finally {
+      setIsLoading(false);
+      setProcessingMessage('PROCESSING...');
     }
   };
 
-  const generateGhostQR = async (imgSrc: string, text: string) => {
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(text)}&bgcolor=FFFFFF&color=000000&margin=0`;
-    const bgImg = new Image(); bgImg.crossOrigin = "Anonymous"; bgImg.src = imgSrc;
-    const qrImg = new Image(); qrImg.crossOrigin = "Anonymous"; qrImg.src = qrUrl;
-
-    await Promise.all([
-        new Promise(resolve => bgImg.onload = resolve),
-        new Promise(resolve => qrImg.onload = resolve)
-    ]);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = bgImg.width;
-    canvas.height = bgImg.height;
-    const ctx = canvas.getContext('2d');
-    if(!ctx) return;
-
-    ctx.drawImage(bgImg, 0, 0);
-
-    const qrSize = canvas.width * 0.12; 
-    const margin = canvas.width * 0.03; 
-    const lx = margin;
-    const ly = canvas.height - margin - qrSize;
-
-    ctx.globalAlpha = 0.5; 
-    ctx.drawImage(qrImg, lx, ly, qrSize, qrSize);
-    ctx.globalAlpha = 1.0;
-
-    setFinalImage(canvas.toDataURL('image/jpeg'));
+  const skipOnChain = () => {
+    setChainRegistration(null);
+    setChainRegistrationError(null);
+    setTransactionId('');
     setMode('result');
-    setIsLoading(false);
   };
 
   // --- 5. 저장 ---
@@ -175,7 +259,7 @@ export default function Home() {
         const response = await fetch(finalImage);
         const blob = await response.blob();
         
-        // ★ 중요: 파일명에 'ZZIN'을 포함시켜 저장해야 나중에 검증됨
+        // 기존 파일명 규칙 유지
         const file = new File([blob], "ZZIN_PROOF.jpg", { type: "image/jpeg" });
         
         if (navigator.share) {
@@ -183,43 +267,100 @@ export default function Home() {
         } else {
              const a = document.createElement('a'); a.href = finalImage; a.download = "ZZIN_PROOF.jpg"; a.click();
         }
-    } catch (e) { alert("저장을 위해 화면을 꾹 눌러주세요."); }
+    } catch (err) {
+      console.error('Save failed', err);
+      alert("저장을 위해 화면을 꾹 눌러주세요.");
+    }
   };
 
-  // --- 6. 검증 (진짜 파일 메타데이터 확인) ---
-  const handleFileLoad = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- 6. 검증 (온체인 매핑 확인) ---
+  const handleFileLoad = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
       const url = URL.createObjectURL(file);
       setFinalImage(url);
-      
-      // ★ 핵심 수정: 파일의 실제 정보를 읽어서 검증 로직 수행
-      // 1. 파일명에 'zzin'이 포함되어 있는지 확인 (우리가 만든 파일인지)
-      const isZZINFile = file.name.toUpperCase().includes('ZZIN');
-      
-      // 2. 파일의 실제 수정 시간(lastModified) 가져오기 -> 가짜 시간 아님
-      const realFileTime = new Date(file.lastModified).toLocaleString();
-
-      setVerifiedData({
-          creator: isZZINFile ? "HUMAN_VERIFIED" : "UNKNOWN",
-          time: realFileTime,
-          isZZIN: isZZINFile
-      });
-
+      setVerifyError(null);
+      setVerifiedData(null);
       setMode('verify_result');
+
+      setIsScanning(true);
+      try {
+        const fileHash = keccak256(toHex(new Uint8Array(await file.arrayBuffer())));
+        const response = await fetch('/api/verify-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileHash }),
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data?.success) {
+          throw new Error(data?.error || '온체인 검증 실패');
+        }
+
+        setVerifiedData({
+          registered: Boolean(data.registered),
+          fileHash,
+          location: data.location || undefined,
+          worldid: data.worldid || undefined,
+          timestamp:
+            typeof data.timestamp === 'string'
+              ? Number(data.timestamp)
+              : data.timestamp,
+          usedZzin: typeof data.usedZzin === 'boolean' ? data.usedZzin : undefined,
+          owner: data.owner || null,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '온체인 검증 실패';
+        setVerifyError(message);
+      } finally {
+        setIsScanning(false);
+      }
   };
 
-  const goBack = () => { setMode('menu'); setTempImage(null); setFinalImage(null); setVerifiedData(null); };
+  const goBack = () => {
+    setMode('menu');
+    setTempImage(null);
+    setFinalImage(null);
+    setVerifiedData(null);
+    setVerifyError(null);
+    setChainRegistration(null);
+    setChainRegistrationError(null);
+    setTransactionId('');
+    setCapturedTimestamp(null);
+  };
 
-  // 스캔 효과
   useEffect(() => {
-    if (mode === 'verify_result') {
-        setIsScanning(true);
-        const timer = setTimeout(() => setIsScanning(false), 2000);
-        return () => clearTimeout(timer);
+    if (!transactionId) return;
+    if (isConfirming) return;
+
+    if (isConfirmed && confirmedTransactionHash) {
+      setChainRegistration((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          transactionHash: confirmedTransactionHash,
+          transactionUrl: `${FILE_REGISTRY_EXPLORER_BASE_URL}/tx/${confirmedTransactionHash}`,
+        };
+      });
+      setTransactionId('');
+      return;
     }
-  }, [mode]);
+
+    if (isConfirmError) {
+      setChainRegistrationError(
+        confirmError?.message || '트랜잭션 확인 중 오류가 발생했습니다.',
+      );
+      setTransactionId('');
+    }
+  }, [
+    transactionId,
+    isConfirming,
+    isConfirmed,
+    isConfirmError,
+    confirmedTransactionHash,
+    confirmError,
+  ]);
 
   // === 렌더링 ===
 
@@ -266,8 +407,8 @@ export default function Home() {
     </div>
   );
 
-  // 3. 카메라 / 프리뷰 / 결과
-  if (['camera', 'preview', 'result'].includes(mode)) return (
+  // 3. 카메라 / 프리뷰 / 온체인 여부 선택 / 결과
+  if (['camera', 'preview', 'register_prompt', 'result'].includes(mode)) return (
     <div className="flex flex-col h-[100dvh] bg-white">
       
       {/* 뷰어 영역 */}
@@ -279,6 +420,7 @@ export default function Home() {
 
         {mode === 'camera' && <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />}
         {(mode === 'preview' && tempImage) && <img src={tempImage} className="w-full h-full object-contain" />}
+        {(mode === 'register_prompt' && finalImage) && <img src={finalImage} className="w-full h-full object-contain" />}
         {(mode === 'result' && finalImage) && <img src={finalImage} className="w-full h-full object-contain" />}
       </div>
 
@@ -292,15 +434,78 @@ export default function Home() {
         {mode === 'preview' && (
             <div className="flex gap-4 w-full">
                 <button onClick={() => setMode('camera')} className="flex-1 py-4 bg-gray-200 text-black font-bold rounded-2xl text-lg">다시 찍기</button>
-                <button onClick={confirmAndSign} className="flex-1 py-4 bg-black text-white font-black rounded-2xl text-lg">박제하기</button>
+                <button onClick={confirmCapture} className="flex-1 py-4 bg-black text-white font-black rounded-2xl text-lg">다음</button>
+            </div>
+        )}
+        {mode === 'register_prompt' && (
+            <div className="w-full space-y-3">
+                <p className="text-center text-base font-bold">온체인에 해시를 등록할까요?</p>
+                {chainRegistrationError && (
+                  <p className="text-center text-sm text-red-600">{chainRegistrationError}</p>
+                )}
+                <div className="flex gap-4 w-full">
+                    <button
+                      onClick={skipOnChain}
+                      className="flex-1 py-4 bg-gray-200 text-black font-bold rounded-2xl text-lg"
+                    >
+                      건너뛰기
+                    </button>
+                    <button
+                      onClick={registerOnChain}
+                      className="flex-1 py-4 bg-black text-white font-black rounded-2xl text-lg"
+                    >
+                      온체인 등록
+                    </button>
+                </div>
             </div>
         )}
         {mode === 'result' && (
-            <div className="flex gap-4 w-full">
-                <button onClick={() => setMode('camera')} className="flex-1 py-4 bg-gray-200 text-gray-500 font-bold rounded-2xl">새 촬영</button>
-                <button onClick={handleSave} className="flex-[2] py-4 bg-[#00ffcc] text-black font-black rounded-2xl text-lg flex items-center justify-center gap-2 shadow-lg">
-                    <span>💾</span> 저장 / 공유
-                </button>
+            <div className="w-full space-y-3">
+                {chainRegistrationError && (
+                  <p className="text-center text-sm text-red-600">{chainRegistrationError}</p>
+                )}
+                <div className="rounded-2xl bg-zinc-100 p-3 text-xs text-zinc-700">
+                  {chainRegistration?.transactionHash ? (
+                    <div className="space-y-1">
+                      <p>Network: {chainRegistration.network || 'worldchain'}</p>
+                      <p className="break-all">Verified User: {chainRegistration.verifiedWalletAddress}</p>
+                      <p className="break-all">WorldID: {chainRegistration.worldid}</p>
+                      <p>Timestamp: {chainRegistration.timestamp ? new Date(chainRegistration.timestamp * 1000).toLocaleString() : '-'}</p>
+                      <p>ZZIN Used: {String(chainRegistration.usedZzin)}</p>
+                      <p className="break-all">File Hash: {chainRegistration.fileHash}</p>
+                      <p className="break-all">Tx: {chainRegistration.transactionHash}</p>
+                      {chainRegistration.transactionUrl && (
+                        <a
+                          href={chainRegistration.transactionUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold underline"
+                        >
+                          Worldscan에서 확인
+                        </a>
+                      )}
+                    </div>
+                  ) : chainRegistration?.transactionId ? (
+                    <div className="space-y-1">
+                      <p>Network: {chainRegistration.network || 'worldchain'}</p>
+                      <p className="break-all">Verified User: {chainRegistration.verifiedWalletAddress}</p>
+                      <p className="break-all">WorldID: {chainRegistration.worldid}</p>
+                      <p>Timestamp: {chainRegistration.timestamp ? new Date(chainRegistration.timestamp * 1000).toLocaleString() : '-'}</p>
+                      <p>ZZIN Used: {String(chainRegistration.usedZzin)}</p>
+                      <p className="break-all">File Hash: {chainRegistration.fileHash}</p>
+                      <p className="break-all">Transaction ID: {chainRegistration.transactionId}</p>
+                      <p className="text-emerald-700">트랜잭션 확인 중...</p>
+                    </div>
+                  ) : (
+                    <p>온체인 등록을 건너뛴 이미지입니다.</p>
+                  )}
+                </div>
+                <div className="flex gap-4 w-full">
+                    <button onClick={() => setMode('camera')} className="flex-1 py-4 bg-gray-200 text-gray-500 font-bold rounded-2xl">새 촬영</button>
+                    <button onClick={handleSave} className="flex-[2] py-4 bg-[#00ffcc] text-black font-black rounded-2xl text-lg flex items-center justify-center gap-2 shadow-lg">
+                        <span>💾</span> 저장 / 공유
+                    </button>
+                </div>
             </div>
         )}
       </div>
@@ -309,7 +514,7 @@ export default function Home() {
       {isLoading && (
         <div className="absolute inset-0 bg-black/90 z-50 flex flex-col items-center justify-center">
             <div className="w-10 h-10 border-4 border-zinc-800 border-t-white rounded-full animate-spin mb-4"></div>
-            <p className="text-white font-bold text-sm tracking-widest">{status}</p>
+            <p className="text-white font-bold text-sm tracking-widest">{processingMessage}</p>
         </div>
       )}
     </div>
@@ -348,7 +553,7 @@ export default function Home() {
 
           {/* 이미지 표시 */}
           <div className="flex-1 flex items-center justify-center p-6 relative overflow-hidden bg-black/50">
-            <div className={`relative transition-all duration-500 ${(!isScanning && verifiedData?.isZZIN) ? 'border-2 border-[#00ffcc] shadow-[0_0_50px_rgba(0,255,204,0.3)]' : ''}`}>
+            <div className={`relative transition-all duration-500 ${(!isScanning && verifiedData?.registered) ? 'border-2 border-[#00ffcc] shadow-[0_0_50px_rgba(0,255,204,0.3)]' : ''}`}>
                 <img src={finalImage!} className="max-w-full max-h-[60vh] object-contain"/>
                 {isScanning && (
                     <div className="absolute inset-0 border-b-2 border-[#00ffcc] animate-[scan_1.5s_ease-in-out_infinite] shadow-[0_0_20px_#00ffcc] bg-gradient-to-b from-transparent to-[#00ffcc]/10"></div>
@@ -361,12 +566,19 @@ export default function Home() {
               {isScanning ? (
                   <div className="flex flex-col items-center gap-3">
                       <div className="w-6 h-6 border-2 border-zinc-700 border-t-[#00ffcc] rounded-full animate-spin"></div>
-                      <p className="text-[#00ffcc] font-mono text-xs tracking-widest">VERIFYING METADATA...</p>
+                      <p className="text-[#00ffcc] font-mono text-xs tracking-widest">VERIFYING ON-CHAIN...</p>
                   </div>
               ) : (
                   <div className="flex flex-col items-center gap-6 w-full animate-in slide-in-from-bottom-5">
-                      
-                      {verifiedData?.isZZIN ? (
+
+                      {verifyError ? (
+                          <>
+                            <div className="text-center">
+                                <h2 className="text-3xl font-black italic text-red-500 tracking-tight mb-1">VERIFY ERROR</h2>
+                            </div>
+                            <p className="text-zinc-400 text-sm text-center">{verifyError}</p>
+                          </>
+                      ) : verifiedData?.registered ? (
                           // 성공 화면
                           <>
                             <div className="text-center">
@@ -378,17 +590,20 @@ export default function Home() {
 
                             <div className="w-full bg-black/50 rounded-xl p-4 border border-zinc-800 space-y-3">
                                 <div className="flex justify-between items-center">
-                                    <span className="text-zinc-500 text-xs font-bold">CREATOR</span>
-                                    <span className="text-white font-mono text-xs truncate max-w-[150px]">{verifiedData.creator.slice(0,10)}...</span>
+                                    <span className="text-zinc-500 text-xs font-bold">LOCATION</span>
+                                    <span className="text-white font-mono text-xs truncate max-w-[150px]">{verifiedData.location}</span>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className="text-zinc-500 text-xs font-bold">CREATED AT</span>
-                                    {/* 진짜 파일 시간 표시 */}
-                                    <span className="text-white font-mono text-xs">{verifiedData.time}</span>
+                                    <span className="text-zinc-500 text-xs font-bold">WORLDID</span>
+                                    <span className="text-white font-mono text-xs">{verifiedData.worldid}</span>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className="text-zinc-500 text-xs font-bold">STATUS</span>
-                                    <span className="text-[#00ffcc] font-mono text-xs">Valid Signature</span>
+                                    <span className="text-zinc-500 text-xs font-bold">TIMESTAMP</span>
+                                    <span className="text-white font-mono text-xs">{verifiedData.timestamp ? new Date(verifiedData.timestamp * 1000).toLocaleString() : '-'}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-zinc-500 text-xs font-bold">ZZIN USED</span>
+                                    <span className="text-[#00ffcc] font-mono text-xs">{String(verifiedData.usedZzin)}</span>
                                 </div>
                             </div>
                           </>
@@ -398,11 +613,11 @@ export default function Home() {
                              <div className="text-center">
                                 <h2 className="text-3xl font-black italic text-red-500 tracking-tight mb-1">UNKNOWN SOURCE</h2>
                                 <div className="text-red-500 text-xs font-bold tracking-widest border border-red-500 px-2 py-1 inline-block rounded">
-                                    VERIFICATION FAILED
+                                    NOT REGISTERED
                                 </div>
                             </div>
                             <p className="text-zinc-500 text-sm text-center">
-                                ZZIN으로 촬영된 이미지가 아니거나<br/>데이터가 손상되었습니다.
+                                온체인 매핑에서 해당 이미지 해시를 찾지 못했습니다.
                             </p>
                           </>
                       )}

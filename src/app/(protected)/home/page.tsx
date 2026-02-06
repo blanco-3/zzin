@@ -1,4 +1,5 @@
 import { auth } from '@/auth';
+import { FileIntegrity } from '@/components/FileIntegrity';
 import { Page } from '@/components/PageLayout';
 import { Pay } from '@/components/Pay';
 import { Transaction } from '@/components/Transaction';
@@ -30,6 +31,7 @@ export default async function Home() {
         <Verify />
         <Pay />
         <Transaction />
+        <FileIntegrity />
         <ViewPermissions />
       </Page.Main>
     </>
