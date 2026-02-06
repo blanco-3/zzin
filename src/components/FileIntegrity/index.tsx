@@ -1,6 +1,6 @@
 'use client';
 
-import FileRegistryABI from '@/abi/FileRegistry.json';
+import FileRegistryWriteABI from '@/abi/FileRegistryWrite.json';
 import { Button } from '@worldcoin/mini-apps-ui-kit-react';
 import { MiniKit, VerificationLevel } from '@worldcoin/minikit-js';
 import { useWaitForTransactionReceipt } from '@worldcoin/minikit-react';
@@ -179,7 +179,7 @@ export const FileIntegrity = () => {
         transaction: [
           {
             address: FILE_REGISTRY_CONTRACT_ADDRESS,
-            abi: FileRegistryABI,
+            abi: FileRegistryWriteABI,
             functionName: 'registerFile',
             args: [
               registerHash,
@@ -194,7 +194,30 @@ export const FileIntegrity = () => {
         ],
       });
       if (finalPayload.status !== 'success') {
-        throw new Error('트랜잭션이 거절되었거나 제출에 실패했습니다.');
+        const errorCode =
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (finalPayload as any)?.error_code || 'unknown_error';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const debugUrl = (finalPayload as any)?.debug_url as string | undefined;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const details = (finalPayload as any)?.details as Record<string, unknown> | undefined;
+        const simulationError =
+          typeof details?.simulationError === 'string'
+            ? details.simulationError
+            : typeof details?.reason === 'string'
+              ? details.reason
+              : undefined;
+        const hint =
+          errorCode === 'input_error'
+            ? ' (ABI/args 타입 또는 ABI 크기(8KB 제한) 문제일 가능성이 큽니다.)'
+            : errorCode === 'invalid_contract'
+              ? ' (Dev Portal에서 컨트랙트 allowlist(whitelist) 필요)'
+              : '';
+        throw new Error(
+          `sendTransaction 실패: ${errorCode}${hint}${
+            simulationError ? ` simulation_error=${simulationError}` : ''
+          }${debugUrl ? ` debug_url=${debugUrl}` : ''}`,
+        );
       }
 
       setRegisterResult({

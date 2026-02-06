@@ -136,7 +136,16 @@ contract FileRegistry {
         require(!isRegistered[_originalHash], "Hash already registered");
         require(bytes(_worldid).length > 0, "Invalid worldid");
         require(_timestamp > 0, "Invalid timestamp");
-        require(!nullifierHashes[_nullifierHash], "Nullifier already used");
+        // NOTE:
+        // World ID's nullifierHash is derived from (identity, externalNullifier).
+        // In this contract, externalNullifier is constant (appId + action), so the
+        // same person will always produce the same nullifierHash.
+        //
+        // We intentionally DO NOT enforce one-time-only usage of nullifierHash,
+        // because ZZIN needs to allow a single verified user to register multiple
+        // different photos (signals). Replay is still safe here because the proof
+        // is bound to the signalHash (originalHash); a proof for one hash cannot
+        // be reused for a different hash.
 
         uint256 signalHash = abi.encodePacked(_originalHash).hashToField();
         worldId.verifyProof(
@@ -147,7 +156,6 @@ contract FileRegistry {
             externalNullifier,
             _proof
         );
-        nullifierHashes[_nullifierHash] = true;
 
         string memory location = _usedZzin ? "zzin" : "external";
 

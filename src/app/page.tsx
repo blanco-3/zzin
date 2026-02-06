@@ -1,6 +1,6 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react';
-import FileRegistryABI from '@/abi/FileRegistry.json';
+import FileRegistryWriteABI from '@/abi/FileRegistryWrite.json';
 import { MiniKit, VerificationLevel } from '@worldcoin/minikit-js';
 import { useWaitForTransactionReceipt } from '@worldcoin/minikit-react';
 import { createPublicClient, decodeAbiParameters, http, keccak256, toHex } from 'viem';
@@ -66,9 +66,33 @@ export default function Home() {
     owner?: string | null;
   } | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyHint, setVerifyHint] = useState<string | null>(null);
+  const [manualVerifyHash, setManualVerifyHash] = useState<string>('');
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [manualVerifyHint, setManualVerifyHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const enabled = new URLSearchParams(window.location.search).get('debug') === '1';
+      setDebugEnabled(enabled);
+      if (enabled) {
+        console.log('[ZZIN][debug] enabled via ?debug=1');
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const debugGroup = (title: string, details?: unknown) => {
+    if (!debugEnabled) return;
+    console.groupCollapsed(`[ZZIN][debug] ${title}`);
+    if (details !== undefined) console.log(details);
+    console.groupEnd();
+  };
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const manualVerifyInputRef = useRef<HTMLInputElement>(null);
   const {
     transactionHash: confirmedTransactionHash,
     isLoading: isConfirming,
@@ -188,6 +212,12 @@ export default function Home() {
       const timestamp = capturedTimestamp || Math.floor(Date.now() / 1000);
 
       const oHash = await hashImage(tempImage);
+      debugGroup('confirmCapture: computed original hash', {
+        walletAddress,
+        worldid,
+        timestamp,
+        originalHash: oHash,
+      });
       const certDataUrl = await createCertifiedImageDataUrl({
         baseImageSrc: tempImage,
         worldid,
@@ -195,6 +225,9 @@ export default function Home() {
         originalHash: oHash,
       });
       const cHash = await hashImage(certDataUrl);
+      debugGroup('confirmCapture: computed certificate hash', {
+        certifiedHash: cHash,
+      });
 
       setOriginalImage(tempImage);
       setCertifiedImage(certDataUrl);
@@ -226,6 +259,13 @@ export default function Home() {
     const response = await fetch(imageSrc);
     const blob = await response.blob();
     const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (debugEnabled) {
+      debugGroup('hashImage: bytes', {
+        srcPrefix: imageSrc.slice(0, 32),
+        mime: blob.type,
+        size: blob.size,
+      });
+    }
     return keccak256(toHex(bytes));
   };
 
@@ -407,6 +447,13 @@ export default function Home() {
         originalHash || (originalImage ? await hashImage(originalImage) : await hashImage(finalImage));
       const cHash =
         certifiedHash || (certifiedImage ? await hashImage(certifiedImage) : oHash);
+      debugGroup('registerOnChain: hashes', {
+        originalHash: oHash,
+        certifiedHash: cHash,
+        hasOriginalImage: Boolean(originalImage),
+        hasCertifiedImage: Boolean(certifiedImage),
+        finalImagePrefix: finalImage?.slice(0, 32),
+      });
 
       // World ID proof tied to the ORIGINAL hash (signal = originalHash)
       const verifyRes = await MiniKit.commandsAsync.verify({
@@ -427,27 +474,94 @@ export default function Home() {
       const nullifierHash = BigInt(proofPayload.nullifier_hash);
 
       setProcessingMessage('SUBMITTING TX...');
+
+      // If the original hash is already registered, only link the new certificate.
+      const isAlreadyRegistered = (await fileRegistryPublicClient.readContract({
+        address: FILE_REGISTRY_CONTRACT_ADDRESS,
+        abi: [
+          {
+            type: 'function',
+            name: 'isFileRegistered',
+            stateMutability: 'view',
+            inputs: [{ name: '_fileHash', type: 'bytes32' }],
+            outputs: [{ name: '', type: 'bool' }],
+          },
+        ],
+        functionName: 'isFileRegistered',
+        args: [oHash as `0x${string}`],
+      })) as boolean;
+
+      const functionName = isAlreadyRegistered
+        ? ('linkCertificate' as const)
+        : ('registerFileWithCertificate' as const);
+
+      debugGroup('sendTransaction: request', {
+        contract: FILE_REGISTRY_CONTRACT_ADDRESS,
+        functionName,
+        isAlreadyRegistered,
+        argsPreview: isAlreadyRegistered
+          ? { oHash, cHash }
+          : {
+              oHash,
+              cHash,
+              worldid,
+              timestamp,
+              usedZzin,
+              merkleRoot: merkleRoot.toString(),
+              nullifierHash: nullifierHash.toString(),
+            },
+      });
+
+      if (isAlreadyRegistered) {
+        setProcessingMessage('LINKING CERTIFICATE...');
+      }
       const { finalPayload } = await MiniKit.commandsAsync.sendTransaction({
         transaction: [
           {
             address: FILE_REGISTRY_CONTRACT_ADDRESS,
-            abi: FileRegistryABI,
-            functionName: 'registerFileWithCertificate',
-            args: [
-              oHash,
-              cHash,
-              worldid,
-              BigInt(timestamp),
-              usedZzin,
-              merkleRoot,
-              nullifierHash,
-              decodedProof,
-            ],
+            abi: FileRegistryWriteABI,
+            functionName,
+            args: isAlreadyRegistered
+              ? ([oHash, cHash] as const)
+              : ([
+                  oHash,
+                  cHash,
+                  worldid,
+                  BigInt(timestamp),
+                  usedZzin,
+                  merkleRoot,
+                  nullifierHash,
+                  decodedProof,
+                ] as const),
           },
         ],
       });
+      debugGroup('sendTransaction: finalPayload', finalPayload);
       if (finalPayload.status !== 'success') {
-        throw new Error('트랜잭션이 거절되었거나 제출에 실패했습니다.');
+        const errorCode =
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (finalPayload as any)?.error_code || 'unknown_error';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const debugUrl = (finalPayload as any)?.debug_url as string | undefined;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const details = (finalPayload as any)?.details as Record<string, unknown> | undefined;
+        const simulationError =
+          typeof details?.simulationError === 'string'
+            ? details.simulationError
+            : typeof details?.reason === 'string'
+              ? details.reason
+              : undefined;
+        const hint =
+          errorCode === 'input_error'
+            ? ' (ABI/args 타입 또는 ABI 크기(8KB 제한) 문제일 가능성이 큽니다.)'
+            : errorCode === 'invalid_contract'
+              ? ' (Dev Portal에서 컨트랙트 allowlist(whitelist) 필요)'
+              : '';
+        throw new Error(
+          `sendTransaction 실패: ${errorCode}${hint}${
+            simulationError ? ` simulation_error=${simulationError}` : ''
+          }${debugUrl ? ` debug_url=${debugUrl}` : ''}`,
+        );
       }
 
       setChainRegistration({
@@ -483,7 +597,8 @@ export default function Home() {
     const src = originalImage || tempImage;
     if (!src) return;
     try {
-      await shareDataUrl(src, 'ZZIN_ORIGINAL.jpg');
+      const oHash = originalHash || (await hashImage(src));
+      await shareDataUrl(src, `ZZIN_ORIGINAL_${oHash}.jpg`);
     } catch (err) {
       console.error('Share original failed', err);
       alert('공유/저장에 실패했습니다.');
@@ -494,7 +609,9 @@ export default function Home() {
     const src = certifiedImage || finalImage;
     if (!src) return;
     try {
-      await shareDataUrl(src, 'ZZIN_CERTIFICATE.jpg');
+      const oHash = originalHash || (originalImage ? await hashImage(originalImage) : await hashImage(finalImage!));
+      const cHash = certifiedHash || (certifiedImage ? await hashImage(certifiedImage) : await hashImage(src));
+      await shareDataUrl(src, `ZZIN_CERTIFICATE_ORIG_${oHash}_CERT_${cHash}.jpg`);
     } catch (err) {
       console.error('Share certificate failed', err);
       alert('공유/저장에 실패했습니다.');
@@ -506,50 +623,138 @@ export default function Home() {
       const file = e.target.files?.[0];
       if (!file) return;
 
+      debugGroup('verify: selected file', {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        lastModified: file.lastModified,
+      });
+
       const url = URL.createObjectURL(file);
       setFinalImage(url);
       setVerifyError(null);
+      setVerifyHint(null);
       setVerifiedData(null);
       setMode('verify_result');
 
       setIsScanning(true);
       try {
         const fileHash = keccak256(toHex(new Uint8Array(await file.arrayBuffer())));
-        const response = await fetch('/api/verify-file', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileHash }),
-        });
-        const data = await response.json();
+        debugGroup('verify: computed fileHash (keccak256(file bytes))', { fileHash });
+        const res = await verifyOnChainByHash(fileHash);
 
-        if (!response.ok || !data?.success) {
-          throw new Error(data?.error || '온체인 검증 실패');
+        // If the bytes don't match (e.g., iOS Photos re-encodes), try extracting the hash from filename.
+        if (!res.registered) {
+          const fromName = normalizeHashCandidate(file.name);
+          if (
+            fromName &&
+            fromName !== fileHash &&
+            /^0x[a-fA-F0-9]{64}$/.test(fromName)
+          ) {
+            debugGroup('verify: fallback hash parsed from filename', { fromName });
+            const res2 = await verifyOnChainByHash(fromName);
+            if (res2.registered) {
+              setVerifyHint('파일명에서 해시를 추출해 검증했습니다. (iOS 사진앱은 이미지가 재인코딩될 수 있어요)');
+            }
+          }
         }
-
-        setVerifiedData({
-          registered: Boolean(data.registered),
-          inputHash: data.inputHash || fileHash,
-          resolvedOriginalHash:
-            typeof data.resolvedOriginalHash === 'string'
-              ? data.resolvedOriginalHash
-              : null,
-          isCertified:
-            typeof data.isCertified === 'boolean' ? data.isCertified : null,
-          location: data.location || undefined,
-          worldid: data.worldid || undefined,
-          timestamp:
-            typeof data.timestamp === 'string'
-              ? Number(data.timestamp)
-              : data.timestamp,
-          usedZzin: typeof data.usedZzin === 'boolean' ? data.usedZzin : undefined,
-          owner: data.owner || null,
-        });
       } catch (err) {
         const message = err instanceof Error ? err.message : '온체인 검증 실패';
         setVerifyError(message);
       } finally {
         setIsScanning(false);
       }
+  };
+
+  const verifyOnChainByHash = async (fileHash: string) => {
+    debugGroup('verifyOnChainByHash: request', { fileHash });
+    const response = await fetch('/api/verify-file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileHash }),
+    });
+    const data = await response.json();
+    debugGroup('verifyOnChainByHash: response', { ok: response.ok, data });
+
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || '온체인 검증 실패');
+    }
+
+    const normalized = {
+      registered: Boolean(data.registered),
+      inputHash: data.inputHash || fileHash,
+      resolvedOriginalHash:
+        typeof data.resolvedOriginalHash === 'string'
+          ? data.resolvedOriginalHash
+          : null,
+      isCertified: typeof data.isCertified === 'boolean' ? data.isCertified : null,
+      location: data.location || undefined,
+      worldid: data.worldid || undefined,
+      timestamp:
+        typeof data.timestamp === 'string' ? Number(data.timestamp) : data.timestamp,
+      usedZzin: typeof data.usedZzin === 'boolean' ? data.usedZzin : undefined,
+      owner: data.owner || null,
+    } as const;
+
+    setVerifiedData(normalized);
+    return normalized;
+  };
+
+  const handleManualVerify = async () => {
+    const hash = manualVerifyHash.trim();
+    if (!hash) return;
+    debugGroup('manual verify: input', { hash });
+    setVerifyError(null);
+    setVerifyHint(null);
+    setVerifiedData(null);
+    setMode('verify_result');
+    setIsScanning(true);
+    try {
+      await verifyOnChainByHash(hash);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '온체인 검증 실패';
+      setVerifyError(message);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const normalizeHashCandidate = (raw: string) => {
+    const text = raw.trim();
+    if (!text) return '';
+
+    // Prefer a full 32-byte hex hash if present anywhere in the clipboard text.
+    const full = text.match(/0x[a-fA-F0-9]{64}/)?.[0];
+    if (full) return full;
+
+    const bare = text.match(/\b[a-fA-F0-9]{64}\b/)?.[0];
+    if (bare) return `0x${bare}`;
+
+    return text;
+  };
+
+  const pasteManualVerifyHash = async () => {
+    setManualVerifyHint(null);
+    try {
+      if (!navigator?.clipboard?.readText) {
+        throw new Error('clipboard_api_unavailable');
+      }
+      const text = await navigator.clipboard.readText();
+      const normalized = normalizeHashCandidate(text);
+      if (!normalized) {
+        setManualVerifyHint('클립보드가 비어있습니다.');
+        return;
+      }
+      setManualVerifyHash(normalized);
+      manualVerifyInputRef.current?.focus();
+      setManualVerifyHint('클립보드에서 해시를 붙여넣었습니다.');
+    } catch (err) {
+      debugGroup('pasteManualVerifyHash: failed', err);
+      // Clipboard APIs are often restricted in WebViews; provide a clear fallback.
+      setManualVerifyHint(
+        '클립보드 접근이 차단되었습니다. 입력칸을 길게 눌러 직접 붙여넣기 하세요.',
+      );
+    }
   };
 
   const goBack = () => {
@@ -563,10 +768,28 @@ export default function Home() {
     setCapturedWorldid(null);
     setVerifiedData(null);
     setVerifyError(null);
+    setVerifyHint(null);
     setChainRegistration(null);
     setChainRegistrationError(null);
     setTransactionId('');
     setCapturedTimestamp(null);
+  };
+
+  const resetCaptureState = () => {
+    // Reset only capture/registration-related state so a "new capture" can't
+    // accidentally reuse prior hashes/images.
+    setTempImage(null);
+    setFinalImage(null);
+    setOriginalImage(null);
+    setCertifiedImage(null);
+    setOriginalHash(null);
+    setCertifiedHash(null);
+    setCapturedWorldid(null);
+    setChainRegistration(null);
+    setChainRegistrationError(null);
+    setTransactionId('');
+    setCapturedTimestamp(null);
+    setVerifyHint(null);
   };
 
   useEffect(() => {
@@ -640,6 +863,7 @@ export default function Home() {
               onClick={async () => {
                 try {
                   await ensureWalletConnected();
+                  resetCaptureState();
                   setMode('camera');
                 } catch (err) {
                   const message =
@@ -687,7 +911,15 @@ export default function Home() {
         )}
         {mode === 'preview' && (
             <div className="flex gap-4 w-full">
-                <button onClick={() => setMode('camera')} className="flex-1 py-4 bg-gray-200 text-black font-bold rounded-2xl text-lg">다시 찍기</button>
+                <button
+                  onClick={() => {
+                    resetCaptureState();
+                    setMode('camera');
+                  }}
+                  className="flex-1 py-4 bg-gray-200 text-black font-bold rounded-2xl text-lg"
+                >
+                  다시 찍기
+                </button>
                 <button onClick={confirmCapture} className="flex-1 py-4 bg-black text-white font-black rounded-2xl text-lg">다음</button>
             </div>
         )}
@@ -757,7 +989,15 @@ export default function Home() {
                   )}
                 </div>
                 <div className="flex gap-4 w-full">
-                    <button onClick={() => setMode('camera')} className="flex-1 py-4 bg-gray-200 text-gray-500 font-bold rounded-2xl">새 촬영</button>
+                    <button
+                      onClick={() => {
+                        resetCaptureState();
+                        setMode('camera');
+                      }}
+                      className="flex-1 py-4 bg-gray-200 text-gray-500 font-bold rounded-2xl"
+                    >
+                      새 촬영
+                    </button>
                     <button
                       onClick={handleShareOriginal}
                       className="flex-1 py-4 bg-gray-200 text-black font-bold rounded-2xl text-lg flex items-center justify-center gap-2"
@@ -799,7 +1039,51 @@ export default function Home() {
                 <p className="text-zinc-500 text-xs">Tap to open gallery</p>
                 <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileLoad} className="hidden" />
             </div>
-            <p className="text-zinc-600 text-xs mt-6">ZZIN 원본/인증서 이미지 모두 검증 가능합니다.</p>
+            <div className="mt-6 grid gap-3 text-left">
+              <p className="text-zinc-600 text-xs">ZZIN 원본/인증서 이미지 모두 검증 가능합니다.</p>
+              {debugEnabled && (
+                <p className="text-[10px] text-emerald-400 font-mono">
+                  DEBUG ON (URL: ?debug=1)
+                </p>
+              )}
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
+                <p className="text-[10px] text-zinc-400 font-mono mb-2">또는 해시를 직접 입력</p>
+                <input
+                  ref={manualVerifyInputRef}
+                  value={manualVerifyHash}
+                  onChange={(e) => setManualVerifyHash(e.target.value)}
+                  placeholder="0x + 64 hex"
+                  className="w-full rounded-xl bg-black/60 border border-zinc-800 px-3 py-2 text-xs font-mono text-white outline-none"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                />
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={pasteManualVerifyHash}
+                    className="flex-1 py-3 bg-zinc-800 text-white font-bold rounded-2xl"
+                  >
+                    붙여넣기
+                  </button>
+                  <button
+                    onClick={handleManualVerify}
+                    disabled={!manualVerifyHash.trim()}
+                    className="flex-[2] py-3 bg-white text-black font-bold rounded-2xl disabled:opacity-40"
+                  >
+                    해시로 검증
+                  </button>
+                </div>
+                {manualVerifyHint && (
+                  <p className="mt-2 text-[10px] text-zinc-400">{manualVerifyHint}</p>
+                )}
+                <p className="mt-2 text-[10px] text-zinc-500">
+                  iOS 사진첩은 저장/공유 과정에서 이미지를 재인코딩해 바이트가 바뀔 수 있어요. 그 경우 “같은 사진”이라도 해시가 달라집니다.
+                </p>
+                <p className="mt-1 text-[10px] text-zinc-500">
+                  가능한 경우: 저장할 때 “파일에 저장(Save to Files)”을 사용하면 파일명에 포함된 해시로도 검증할 수 있어요.
+                </p>
+              </div>
+            </div>
         </div>
     </div>
   );
@@ -851,6 +1135,9 @@ export default function Home() {
                                 <div className="text-[#00ffcc] text-xs font-bold tracking-widest border border-[#00ffcc] px-2 py-1 inline-block rounded">
                                     ZZIN VERIFIED
                                 </div>
+                                {verifyHint && (
+                                  <p className="mt-2 text-[10px] text-zinc-400">{verifyHint}</p>
+                                )}
                                 {typeof verifiedData.isCertified === 'boolean' && (
                                   <p className="mt-2 text-[10px] text-zinc-400 font-mono">
                                     QUERY: {verifiedData.isCertified ? 'CERTIFICATE HASH' : 'ORIGINAL HASH'}
@@ -889,6 +1176,12 @@ export default function Home() {
                             <p className="text-zinc-500 text-sm text-center">
                                 온체인 매핑에서 해당 이미지 해시를 찾지 못했습니다.
                             </p>
+                            {verifiedData?.inputHash && (
+                              <div className="w-full bg-black/50 rounded-xl p-4 border border-zinc-800">
+                                <p className="text-zinc-400 text-[10px] font-mono mb-2">COMPUTED HASH</p>
+                                <p className="break-all text-xs font-mono text-white">{verifiedData.inputHash}</p>
+                              </div>
+                            )}
                           </>
                       )}
 

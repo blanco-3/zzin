@@ -1,0 +1,43 @@
+[
+  {
+    "type": "function",
+    "name": "registerFile",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "_originalHash", "type": "bytes32" },
+      { "name": "_worldid", "type": "string" },
+      { "name": "_timestamp", "type": "uint256" },
+      { "name": "_usedZzin", "type": "bool" },
+      { "name": "_root", "type": "uint256" },
+      { "name": "_nullifierHash", "type": "uint256" },
+      { "name": "_proof", "type": "uint256[8]" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "registerFileWithCertificate",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "_originalHash", "type": "bytes32" },
+      { "name": "_certifiedHash", "type": "bytes32" },
+      { "name": "_worldid", "type": "string" },
+      { "name": "_timestamp", "type": "uint256" },
+      { "name": "_usedZzin", "type": "bool" },
+      { "name": "_root", "type": "uint256" },
+      { "name": "_nullifierHash", "type": "uint256" },
+      { "name": "_proof", "type": "uint256[8]" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "linkCertificate",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "_originalHash", "type": "bytes32" },
+      { "name": "_certifiedHash", "type": "bytes32" }
+    ],
+    "outputs": []
+  }
+]

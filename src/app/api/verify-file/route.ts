@@ -25,6 +25,8 @@ export async function POST(req: NextRequest) {
     const contractAddress = getFileRegistryContractAddress();
     const publicClient = getFileRegistryPublicClient();
 
+    console.log('[verify-file] input', { inputHash, contractAddress });
+
     const originalHash = (await publicClient.readContract({
       address: contractAddress,
       abi: fileRegistryAbi,
@@ -40,6 +42,7 @@ export async function POST(req: NextRequest) {
         : null;
 
     if (!resolved) {
+      console.log('[verify-file] not found', { inputHash, originalHash });
       return NextResponse.json({
         success: true,
         inputHash,
@@ -71,6 +74,19 @@ export async function POST(req: NextRequest) {
     });
 
     const registered = Boolean(exists) && owner !== zeroAddress;
+
+    console.log('[verify-file] resolved', {
+      inputHash,
+      resolved,
+      isCertified,
+      registered,
+      owner,
+      location,
+      worldid,
+      timestamp: timestamp.toString(),
+      usedZzin,
+      exists,
+    });
 
     return NextResponse.json({
       success: true,
