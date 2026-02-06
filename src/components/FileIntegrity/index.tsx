@@ -2,16 +2,17 @@
 
 import FileRegistryABI from '@/abi/FileRegistry.json';
 import { Button } from '@worldcoin/mini-apps-ui-kit-react';
-import { getIsUserVerified, MiniKit } from '@worldcoin/minikit-js';
+import { MiniKit } from '@worldcoin/minikit-js';
 import { useWaitForTransactionReceipt } from '@worldcoin/minikit-react';
 import { useEffect, useState } from 'react';
-import { createPublicClient, http, keccak256, toHex } from 'viem';
+import { createPublicClient, decodeAbiParameters, http, keccak256, toHex } from 'viem';
 import { worldchain } from 'viem/chains';
 
 const DEFAULT_WORLDCHAIN_RPC_URL = 'https://worldchain-mainnet.g.alchemy.com/public';
 const FILE_REGISTRY_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_FILE_REGISTRY_CONTRACT_ADDRESS as `0x${string}` | undefined;
 const FILE_REGISTRY_RPC_URL = process.env.NEXT_PUBLIC_FILE_REGISTRY_RPC_URL || DEFAULT_WORLDCHAIN_RPC_URL;
 const FILE_REGISTRY_EXPLORER_BASE_URL = process.env.NEXT_PUBLIC_FILE_REGISTRY_EXPLORER_BASE_URL || 'https://worldscan.org';
+const WORLD_ID_ACTION = 'orbgate';
 const fileRegistryPublicClient = createPublicClient({
   chain: worldchain,
   transport: http(FILE_REGISTRY_RPC_URL),
@@ -153,13 +154,24 @@ export const FileIntegrity = () => {
         ? Math.floor(registerFile.lastModified / 1000) || Math.floor(Date.now() / 1000)
         : Math.floor(Date.now() / 1000);
 
-      const isVerifiedUser = await getIsUserVerified(
-        userInfo.walletAddress,
-        FILE_REGISTRY_RPC_URL,
-      );
-      if (!isVerifiedUser) {
-        throw new Error('Address Book 기준 Orb 검증 지갑이 아닙니다.');
+      // World ID proof (Orb) bound to the file hash
+      const verifyRes = await MiniKit.commandsAsync.verify({
+        app_id: process.env.NEXT_PUBLIC_APP_ID || '',
+        action: WORLD_ID_ACTION,
+        signal: registerHash,
+        verification_level: 'orb',
+      });
+      const proofPayload = verifyRes?.finalPayload;
+      if (proofPayload?.status !== 'success') {
+        throw new Error('World ID 인증에 실패했습니다.');
       }
+
+      const decodedProof = decodeAbiParameters(
+        [{ type: 'uint256[8]' }],
+        proofPayload.proof as `0x${string}`,
+      )[0] as readonly bigint[];
+      const merkleRoot = BigInt(proofPayload.merkle_root);
+      const nullifierHash = BigInt(proofPayload.nullifier_hash);
 
       const { finalPayload } = await MiniKit.commandsAsync.sendTransaction({
         transaction: [
@@ -167,7 +179,15 @@ export const FileIntegrity = () => {
             address: FILE_REGISTRY_CONTRACT_ADDRESS,
             abi: FileRegistryABI,
             functionName: 'registerFile',
-            args: [registerHash, worldid, BigInt(timestamp), usedZzin],
+            args: [
+              registerHash,
+              worldid,
+              BigInt(timestamp),
+              usedZzin,
+              merkleRoot,
+              nullifierHash,
+              decodedProof,
+            ],
           },
         ],
       });

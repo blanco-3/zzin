@@ -5,9 +5,8 @@ import {
   getFileRegistryWalletClient,
   normalizeFileHash,
 } from '@/lib/file-registry';
-import { getIsUserVerified } from '@worldcoin/minikit-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { isAddress } from 'viem';
+import { decodeAbiParameters, Hex, isAddress } from 'viem';
 
 interface RegisterFileRequest {
   fileHash?: string;
@@ -15,6 +14,9 @@ interface RegisterFileRequest {
   worldid?: string;
   timestamp?: number;
   usedZzin?: boolean;
+  root?: string;
+  nullifierHash?: string;
+  proof?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -62,13 +64,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rpcUrl = process.env.FILE_REGISTRY_RPC_URL || undefined;
-    const isVerifiedUser = await getIsUserVerified(body.walletAddress, rpcUrl);
+    const root =
+      typeof body.root === 'string' && body.root.startsWith('0x')
+        ? BigInt(body.root)
+        : undefined;
+    const nullifierHash =
+      typeof body.nullifierHash === 'string' && body.nullifierHash.startsWith('0x')
+        ? BigInt(body.nullifierHash)
+        : undefined;
+    const proof =
+      typeof body.proof === 'string' && body.proof.startsWith('0x')
+        ? (decodeAbiParameters([{ type: 'uint256[8]' }], body.proof as Hex)[0] as
+            | readonly bigint[]
+            | undefined)
+        : undefined;
 
-    if (!isVerifiedUser) {
+    if (!root || !nullifierHash || !proof) {
       return NextResponse.json(
-        { success: false, error: 'Address Book verification failed' },
-        { status: 403 },
+        { success: false, error: 'World ID proof (root/nullifier/proof) is required' },
+        { status: 400 },
       );
     }
 
@@ -80,7 +94,7 @@ export async function POST(req: NextRequest) {
       address: contractAddress,
       abi: fileRegistryAbi,
       functionName: 'registerFile',
-      args: [hash, worldid, BigInt(timestamp), usedZzin],
+      args: [hash, worldid, BigInt(timestamp), usedZzin, root, nullifierHash, proof],
       account,
     });
 
