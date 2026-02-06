@@ -51,3 +51,51 @@ This is a concise, action-oriented cheat sheet for using IDKit to perform Orb-ve
 - Never trust client-only verification; always re-verify server-side.
 - Keep `app_id`/`action` consistent with your World ID configuration.
 - Use HTTPS for all proof submissions; sanitize/log minimal PII.
+
+---
+
+## World Mini Apps API quick reference
+
+- Base URL: `https://developer.worldcoin.org`. All endpoints below are relative to this base.
+- Auth: The OpenAPI spec lists no security schema, but real calls generally include your developer token (e.g., `Authorization: Bearer <api_key>`) plus any app_id fields noted below.
+- Rate/size constraints (per spec): notifications allow up to 1,000 wallet addresses per call; titles max 30 chars, messages max 200 chars.
+
+### Identity / Proof
+- `POST /api/v2/verify/{app_id}` — Cloud-side World ID proof verification for an action.
+  - Path: `app_id`.
+  - Body (`VerifyProofRequest`): `nullifier_hash` (req), `proof` (req), `merkle_root` (req), `verification_level` (req), `action` (req), optional `signal_hash`, optional `max_age` (seconds, 3600–604800, default 7200).
+  - Use when you need server-side confirmation that a World ID proof for a given action is valid/fresh.
+
+### Incognito actions
+- `POST /api/v2/create-action/{app_id}` — Define an incognito action and derive its external nullifier.
+  - Path: `app_id`.
+  - Body (`CreateActionRequest`): `action` (req), optional `name`, `description`, `max_verifications` (default 1).
+  - Response includes `external_nullifier` alongside action metadata.
+
+### MiniKit transactions
+- `GET /api/v2/minikit/transaction/{transaction_id}` — Fetch transaction status/details.
+  - Path: `transaction_id`; Query: `app_id` (req), `type` (req, e.g., transaction flavor).
+  - Response (`GetTransactionResponse`): `transaction_status` (`pending|mined|failed`), `transaction_hash`, `reference`, `from`, `to`, `token_amount` (BigInt string, 6 decimals), `token`, `chain`, `timestamp`, `app_id`.
+- `GET /api/v2/minikit/transaction/debug` — Get Tenderly debug URLs for failed prepare-stage transactions.
+  - Query: `app_id` (req).
+  - Response: `transactions[]` with `debugUrl`, `createdAt`, `block`, `simulationRequestId`, `simulationError`, `walletAddress`.
+
+### Notifications
+- `POST /api/v2/minikit/send-notification` — Push a notification to opted-in users.
+  - Body (`SendNotificationRequest`): `wallet_addresses` (req, array, <=1000), `title` (req, <=30 chars), `message` (req, <=200 chars, `${username}` placeholder allowed), `mini_app_path` (req, deep link: `worldapp://mini-app?app_id=[app_id]&path=[path]`), `app_id` (req).
+  - Response: `success`, `status`, `result[]` per wallet (`sent`, `reason` if failed).
+
+### Grants
+- `GET /api/v2/minikit/user-grant-cycle` — Next grant claim date for a user.
+  - Query: `wallet_address` (req), `app_id` (req).
+  - Response: `result.nextGrantClaimUTCDate` (ISO datetime).
+
+### Pricing
+- `GET /public/v1/miniapps/prices` — Latest token prices in fiat.
+  - Query: `fiatCurrencies` (req, comma-separated codes), `cryptoCurrencies` (req, comma-separated codes).
+  - Response: `result.prices` keyed by currency code; each entry carries `asset`, `amount`, `decimals`, `symbol`.
+
+### Credit (borrower lookup)
+- `GET /api/borrower/{identifier}` — Borrower state/score by wallet address or World username.
+  - Path: `identifier`.
+  - Response (`CreditBorrower`): `state` (`INACTIVE|ACTIVE|DEFAULTED`), `score` (int >=0). On errors, `CreditError` schema may be returned.
